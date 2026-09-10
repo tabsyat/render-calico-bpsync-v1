@@ -1,0 +1,6 @@
+.env
+team_map.json
+__pycache__/
+*.pyc
+.streamlit/secrets.toml
+.venv/
