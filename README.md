@@ -4,10 +4,6 @@ A per-round sync tool between a Render-hosted Tabbycat instance (used for
 draw generation) and a Calico-hosted Tabbycat instance (the public
 tournament judges/teams interact with).
 
-Each tab director runs their **own instance** of this tool, on their own
-Render account, with their own API tokens. Nobody else — including the
-maintainer of this repo — ever sees those tokens.
-
 ## Deploy your own copy
 
 1. Click **Deploy to Render** (button below, once this repo is public):
@@ -23,10 +19,9 @@ maintainer of this repo — ever sees those tokens.
      (e.g. `https://your-instance.calicotab.com/api/v1/tournaments/your-slug`)
    - `CALICO_TOKEN` — your API token for that instance
 
-   No trailing slash on the URLs.
+   Ensure No trailing slash on the URLs. (mandatory)
 
-3. Click deploy. Once the build finishes, Render gives you a URL — that's
-   your private sync tool.
+3. Click deploy. Once the build finishes, Render gives you a URL which is your private sync tool.
 
 ## Using it, once per round
 
@@ -39,8 +34,7 @@ in order:
 3. **Review Pause** — go review the generated draw on Render's own UI,
    then tick the confirmation box.
 4. **Push Draw → Calico** — pushes the reviewed draw to Calico as a
-   **Draft** (never auto-released — releasing to the public stays a
-   manual step in Calico's own UI).
+   **Draft**
 
 ## Local development
 
@@ -55,5 +49,3 @@ streamlit run app.py
 - `team_map.json` is created by Section 1 and used by Sections 2 and 4 to
   map team IDs between the two instances. It's excluded from git — it's
   local/per-instance data, not code.
-- This tool never sets a round's `draw_status` to `Released` on either
-  instance. Publishing to judges/teams is always a deliberate manual step.
