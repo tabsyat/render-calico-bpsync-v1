@@ -4,13 +4,13 @@ app.py
 Streamlit front end for the Render <-> Calico Tabbycat sync tool.
 Wraps sync_core.py (ported from Render_Calico_Sync_v2.ipynb).
 
-Section order follows the actual operational cycle, not the notebook's
-top-to-bottom numbering:
-    0. Overview        - reference dashboard only, not a gate
-    1. Import Teams     - once, before Round 1
-    3. Review Pause      -\
-    4. Push Draw -> Calico  > repeats every round, in this order
-    2. Pull Results -> Render -/  (results only exist AFTER round 1 is played)
+Sections are numbered by their actual position in the flow, not the
+original notebook's numbering:
+    0. Overview          - reference dashboard only, not a gate
+    1. Import Teams       - once, before Round 1
+    2. Review Pause         -\
+    3. Push Draw -> Calico     > repeats every round, in this order
+    4. Pull Results -> Render -/
 
 Run locally:   streamlit run app.py
 On Render:     started via render.yaml's startCommand
@@ -42,22 +42,22 @@ except sc.ConfigError as e:
     st.stop()
 
 SECTION_DESCRIPTIONS = {
-    "0": "Reference dashboard: Tournament info and current counts. Not required, just a sanity check.",
+    "0": "Reference dashboard — tournament info and current counts. Not required, just a sanity check.",
     "1": "One-time: copy all teams from Calico to Render, before Round 1.",
-    "3": "Confirm you've reviewed the generated draw on Render's UI.",
-    "4": "Push the reviewed draw from Render to Calico.",
-    "2": "After a round is played on Calico, pull confirmed results into Render.",
+    "2": "Confirm you've reviewed the generated draw on Render's UI.",
+    "3": "Push the reviewed draw from Render to Calico.",
+    "4": "After a round is played on Calico, pull confirmed results into Render.",
 }
 
 section = st.sidebar.radio(
     "Section",
-    ["0", "1", "3", "4", "2"],
+    ["0", "1", "2", "3", "4"],
     format_func=lambda s: {
         "0": "0. Overview",
         "1": "1. Import Teams",
-        "3": "3. Review Pause",
-        "4": "4. Push Draw → Calico",
-        "2": "2. Pull Results → Render",
+        "2": "2. Review Pause",
+        "3": "3. Push Draw → Calico",
+        "4": "4. Pull Results → Render",
     }[s],
 )
 
@@ -96,6 +96,65 @@ if section == "0":
             st.metric("Render adjudicators", counts["render_adjs"])
     else:
         st.info("Click 'Sync counts' to fetch current numbers from both instances.")
+
+    st.divider()
+    st.subheader("Add dummy adjudicators & rooms")
+    st.caption(
+        "BP needs 1 adjudicator + 1 room per 4 teams. Based on Calico's current "
+        "team count, rounded up. Only fills the shortfall — safe to click repeatedly."
+    )
+
+    col_adj, col_room = st.columns(2)
+
+    with col_adj:
+        st.markdown("**Adjudicators**")
+        if st.button("Fill missing adjudicators"):
+            with st.spinner("Checking and creating adjudicators..."):
+                status_line = st.empty()
+
+                def cb(done, total, name):
+                    status_line.write(f"Created {done}/{total}: {name}")
+
+                try:
+                    result = sc.create_dummy_adjudicators(progress_callback=cb)
+                    if result["created"] == 0:
+                        st.success(
+                            f"Already have {result['existing_before']} — "
+                            f"{result['required']} required. Nothing to add."
+                        )
+                    else:
+                        st.success(
+                            f"Created {result['created']} adjudicator(s) "
+                            f"({result['existing_before']} → {result['existing_before'] + result['created']}, "
+                            f"{result['required']} required)."
+                        )
+                except Exception as e:
+                    st.error(f"Failed: {e}")
+
+    with col_room:
+        st.markdown("**Rooms**")
+        if st.button("Fill missing rooms"):
+            with st.spinner("Checking and creating rooms..."):
+                status_line = st.empty()
+
+                def cb(done, total, name):
+                    status_line.write(f"Created {done}/{total}: {name}")
+
+                try:
+                    result = sc.create_dummy_venues(progress_callback=cb)
+                    if result["created"] == 0:
+                        st.success(
+                            f"Already have {result['existing_before']} — "
+                            f"{result['required']} required. Nothing to add."
+                        )
+                    else:
+                        st.success(
+                            f"Created {result['created']} room(s) "
+                            f"({result['existing_before']} → {result['existing_before'] + result['created']}, "
+                            f"{result['required']} required)."
+                        )
+                except Exception as e:
+                    st.error(f"Failed: {e}")
 
 # ---------------------------------------------------------------------------
 # Section 1 - Import Teams (mandatory live check, but never blocks the button -
@@ -152,34 +211,34 @@ elif section == "1":
                "any time to double check the numbers match your expectations.")
 
 # ---------------------------------------------------------------------------
-# Section 3 - Review Pause
+# Section 2 - Review Pause
 # ---------------------------------------------------------------------------
-elif section == "3":
-    st.header("Section 3 — Manual Review")
-    st.caption(SECTION_DESCRIPTIONS["3"])
+elif section == "2":
+    st.header("Section 2 — Manual Review")
+    st.caption(SECTION_DESCRIPTIONS["2"])
     st.markdown(
         "Go to **Render's Tabbycat UI**, generate the draw for the next round, "
         "and review it there (adjudicator allocation, venues, etc. are **not synced** "
         "by this tool — assign them on Render or directly on Calico afterward).\n\n"
-        "Once you're happy with it, tick the box below. Section 4 won't be usable "
+        "Once you're happy with it, tick the box below. Section 3 won't be usable "
         "until you do."
     )
     reviewed = st.checkbox("I've generated and reviewed the draw on Render's UI ✅")
     st.session_state["reviewed"] = reviewed
     if reviewed:
-        st.success("Review confirmed. You can proceed to Section 4.")
+        st.success("Review confirmed. You can proceed to Section 3.")
     else:
         st.info("Waiting for review confirmation.")
 
 # ---------------------------------------------------------------------------
-# Section 4 - Push Draw -> Calico
+# Section 3 - Push Draw -> Calico
 # ---------------------------------------------------------------------------
-elif section == "4":
-    st.header("Section 4 — Pull Render's Draw → Push to Calico")
-    st.caption(SECTION_DESCRIPTIONS["4"])
+elif section == "3":
+    st.header("Section 3 — Pull Render's Draw → Push to Calico")
+    st.caption(SECTION_DESCRIPTIONS["3"])
 
     if not st.session_state.get("reviewed"):
-        st.warning("Please complete Section 3 (Review Pause) first.")
+        st.warning("Please complete Section 2 (Review Pause) first.")
         st.stop()
 
     round_seq = st.number_input("Round number", min_value=1, step=1, value=1, key="push_round")
@@ -213,11 +272,11 @@ elif section == "4":
             st.error(f"Failed: {e}")
 
 # ---------------------------------------------------------------------------
-# Section 2 - Pull Results -> Render (mandatory pre-push confirmation)
+# Section 4 - Pull Results -> Render (mandatory pre-push confirmation)
 # ---------------------------------------------------------------------------
-elif section == "2":
-    st.header("Section 2 — Pull Confirmed Calico Results → Write to Render")
-    st.caption(SECTION_DESCRIPTIONS["2"])
+elif section == "4":
+    st.header("Section 4 — Pull Confirmed Calico Results → Write to Render")
+    st.caption(SECTION_DESCRIPTIONS["4"])
 
     round_seq = st.number_input("Round number", min_value=1, step=1, value=1)
 
