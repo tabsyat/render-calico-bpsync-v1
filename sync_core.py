@@ -401,6 +401,7 @@ def build_calico_payload(render_pairing, inverse_team_map):
     return {
         "bracket": render_pairing.get("bracket", 0),
         "room_rank": render_pairing.get("room_rank", 0),
+        "flags": render_pairing.get("flags", []),
         "teams": teams,
     }
 
