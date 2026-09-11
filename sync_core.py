@@ -27,6 +27,7 @@ import json
 import requests
 
 TEAM_MAP_PATH = "team_map.json"
+REQUEST_TIMEOUT = 30  # seconds - prevents an indefinite hang on a cold/hung instance
 
 
 # ---------------------------------------------------------------------------
@@ -78,43 +79,74 @@ def _raise_with_body(response):
     raise response_error
 
 
-def render_get(path):
-    r = requests.get(f"{RENDER_URL}{path}", headers=_headers(RENDER_TOKEN))
+def _is_paginated_envelope(data):
+    """
+    DRF's paginated list response always has both 'results' and 'next'
+    keys (next may be null on the last/only page). A single-object GET
+    (e.g. /teams/{id}) never has this shape, so this check is safe to
+    use as an auto-detect without touching any call sites.
+    """
+    return isinstance(data, dict) and "results" in data and "next" in data
+
+
+def _get_json_following_pagination(url, headers):
+    """
+    Fetches url; if the response is a paginated DRF envelope, keeps
+    following 'next' and concatenating 'results' until it's null.
+    Otherwise returns the JSON body unchanged (plain list or single object).
+    """
+    r = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
     if not r.ok:
         _raise_with_body(r)
-    return r.json()
+    data = r.json()
+
+    if not _is_paginated_envelope(data):
+        return data
+
+    all_results = list(data["results"])
+    next_url = data.get("next")
+    while next_url:
+        r = requests.get(next_url, headers=headers, timeout=REQUEST_TIMEOUT)
+        if not r.ok:
+            _raise_with_body(r)
+        page = r.json()
+        all_results.extend(page.get("results", []))
+        next_url = page.get("next")
+
+    return all_results
+
+
+def render_get(path):
+    return _get_json_following_pagination(f"{RENDER_URL}{path}", _headers(RENDER_TOKEN))
 
 
 def render_post(path, payload):
-    r = requests.post(f"{RENDER_URL}{path}", headers=_headers(RENDER_TOKEN), json=payload)
+    r = requests.post(f"{RENDER_URL}{path}", headers=_headers(RENDER_TOKEN), json=payload, timeout=REQUEST_TIMEOUT)
     if not r.ok:
         _raise_with_body(r)
     return r.json()
 
 
 def render_patch(path, payload):
-    r = requests.patch(f"{RENDER_URL}{path}", headers=_headers(RENDER_TOKEN), json=payload)
+    r = requests.patch(f"{RENDER_URL}{path}", headers=_headers(RENDER_TOKEN), json=payload, timeout=REQUEST_TIMEOUT)
     if not r.ok:
         _raise_with_body(r)
     return r.json()
 
 
 def calico_get(path):
-    r = requests.get(f"{CALICO_URL}{path}", headers=_headers(CALICO_TOKEN))
-    if not r.ok:
-        _raise_with_body(r)
-    return r.json()
+    return _get_json_following_pagination(f"{CALICO_URL}{path}", _headers(CALICO_TOKEN))
 
 
 def calico_post(path, payload):
-    r = requests.post(f"{CALICO_URL}{path}", headers=_headers(CALICO_TOKEN), json=payload)
+    r = requests.post(f"{CALICO_URL}{path}", headers=_headers(CALICO_TOKEN), json=payload, timeout=REQUEST_TIMEOUT)
     if not r.ok:
         _raise_with_body(r)
     return r.json()
 
 
 def calico_patch(path, payload):
-    r = requests.patch(f"{CALICO_URL}{path}", headers=_headers(CALICO_TOKEN), json=payload)
+    r = requests.patch(f"{CALICO_URL}{path}", headers=_headers(CALICO_TOKEN), json=payload, timeout=REQUEST_TIMEOUT)
     if not r.ok:
         _raise_with_body(r)
     return r.json()
@@ -165,9 +197,20 @@ def clean_team_payload(team):
     }
 
 
-def import_teams(progress_callback=None):
+def import_teams(progress_callback=None, only_calico_ids=None):
+    """
+    Imports teams from Calico to Render. If only_calico_ids is given
+    (a set/list of Calico team ids), only those teams are imported -
+    used to resume a partial import without recreating teams that are
+    already on Render. Merges into (rather than overwrites) any
+    existing team_map.json.
+    """
     calico_teams = calico_get("/teams")
-    team_map = {}
+    if only_calico_ids is not None:
+        only_calico_ids = set(only_calico_ids)
+        calico_teams = [t for t in calico_teams if t["id"] in only_calico_ids]
+
+    team_map = {int(k): v for k, v in load_team_map().items()}
     for i, team in enumerate(calico_teams):
         payload = clean_team_payload(team)
         created = render_post("/teams", payload)
@@ -176,6 +219,43 @@ def import_teams(progress_callback=None):
             progress_callback(i + 1, len(calico_teams), team.get("reference", ""))
     save_team_map(team_map)
     return team_map
+
+
+def get_render_team_references():
+    """reference -> render team id, for identity-based matching."""
+    return {t["reference"]: t["id"] for t in render_get("/teams")}
+
+
+def check_team_import_readiness():
+    """
+    Identity-based (not count-only) readiness check: compares actual
+    team references between Calico and Render, so a coincidental count
+    match isn't mistaken for "already imported", and a partial import
+    can be resumed by reference rather than guessed at.
+
+    Returns (calico_count, render_count, status, info) where info is:
+      - for "partial": the list of Calico teams (full dicts) still
+        missing on Render, so the caller can pass their ids straight
+        into import_teams(only_calico_ids=...)
+      - otherwise: a message string
+    """
+    calico_teams = calico_get("/teams")
+    calico_refs = {t["reference"]: t for t in calico_teams}
+    render_refs = get_render_team_references()
+
+    x = len(calico_refs)
+    y = len(render_refs)
+
+    if x == 0:
+        return x, y, "empty_source", "Calico has no teams yet — importing would copy nothing."
+
+    missing = [t for ref, t in calico_refs.items() if ref not in render_refs]
+
+    if y == 0:
+        return x, y, "ready", "Teams are ready to copy!"
+    if not missing:
+        return x, y, "duplicate_risk", "Teams already exist on Render — please double check before importing again."
+    return x, y, "partial", missing
 
 
 # ---------------------------------------------------------------------------
@@ -288,9 +368,10 @@ def write_results_to_render(round_seq, team_map, render_lookup, progress_callbac
         }
         r = requests.post(
             f"{RENDER_URL}/rounds/{round_seq}/pairings/{render_pairing_id}/ballots",
-            headers=_headers(RENDER_TOKEN), json=payload,
+            headers=_headers(RENDER_TOKEN), json=payload, timeout=REQUEST_TIMEOUT,
         )
-        r.raise_for_status()
+        if not r.ok:
+            _raise_with_body(r)
         written.append(render_pairing_id)
 
         if progress_callback:
@@ -332,8 +413,10 @@ def push_pairings_to_calico(round_seq, render_pairings, inverse_team_map, progre
             f"{CALICO_URL}/rounds/{round_seq}/pairings",
             headers=_headers(CALICO_TOKEN),
             json=payload,
+            timeout=REQUEST_TIMEOUT,
         )
-        created.raise_for_status()
+        if not created.ok:
+            _raise_with_body(created)
         pushed.append(created.json())
         if progress_callback:
             progress_callback(len(pushed), len(render_pairings))
@@ -394,27 +477,6 @@ def get_overview_counts():
         "calico_adjs": get_calico_adjudicator_count(),
         "render_adjs": get_render_adjudicator_count(),
     }
-
-
-def check_team_import_readiness():
-    """
-    Mandatory check run by Section 1's import button itself (not skippable
-    by not visiting Section 0). Returns (calico_count, render_count, status,
-    message) where status is one of:
-      "empty_source"  - Calico has 0 teams, importing would do nothing
-      "ready"         - Render has 0 teams, safe to import
-      "duplicate_risk"- counts match, teams likely already imported
-      "partial"       - Render has some but not all teams, likely a partial/failed prior run
-    """
-    x = get_calico_team_count()
-    y = get_render_team_count()
-
-    if x == 0:
-        return x, y, "empty_source", "Calico has no teams yet — importing would copy nothing."
-    if y == 0:
-        return x, y, "ready", "Teams are ready to copy!"
-    if x == y:
-        return x, y, "duplicate_risk", "Teams already exist on Render — please double check before importing again."
     return x, y, "partial", (
         "Some teams are not migrated to Render — please delete all teams on Render "
         "and re-run the import."
