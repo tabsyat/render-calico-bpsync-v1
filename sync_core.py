@@ -1,27 +1,3 @@
-"""
-sync_core.py
-
-Core Render <-> Calico Tabbycat sync logic for IDL tournaments.
-Ported line-for-line from the working Colab notebook
-(Render_Calico_Sync_v2.ipynb) - same payload shapes, same endpoints,
-same no-trailing-slash conventions confirmed live by Chirag.
-
-Secrets are read from environment variables instead of Colab's
-userdata.get(), everything else is unchanged.
-
-Required env vars (no trailing slash on the URLs):
-    RENDER_URL, RENDER_TOKEN, CALICO_URL, CALICO_TOKEN
-
-*** RECONSTRUCTED FUNCTIONS - VERIFY AGAINST YOUR ORIGINALS ***
-The notebook export calls get_calico_pairings(), get_confirmed_ballot(),
-extract_calico_team_id(), and build_render_pairing_lookup() without
-defining them in any visible cell (likely defined in a cell that didn't
-make it into the export, or run earlier in the session). The versions
-below are inferred from how they're *called* elsewhere in the notebook.
-They are marked with RECONSTRUCTED comments - please check them against
-your real versions before relying on this in production.
-"""
-
 import os
 import json
 import requests
@@ -401,7 +377,6 @@ def build_calico_payload(render_pairing, inverse_team_map):
     return {
         "bracket": render_pairing.get("bracket", 0),
         "room_rank": render_pairing.get("room_rank", 0),
-        "flags": render_pairing.get("flags", []),
         "teams": teams,
     }
 
