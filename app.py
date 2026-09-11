@@ -255,7 +255,7 @@ elif section == "2":
 
     round_seq = st.number_input("Round number", min_value=1, step=1, value=1, key="push_round")
     mark_as_draft = st.checkbox(
-        "Mark round as Draft on Calico after pushing (never Released)",
+        "Click on this box to mark Draw as Draft on Calico (mandatory)",
         value=True,
     )
 
@@ -279,7 +279,7 @@ elif section == "2":
             if mark_as_draft:
                 st.info("Round marked as Draft on Calico. Release it manually when ready.")
             else:
-                st.info("MARK_AS_DRAFT was off — set draw_status on Calico manually if needed.")
+                st.info("MARK_AS_DRAFT was off. Draws are pushed, but set draw_status on Calico manually.")
         except Exception as e:
             st.error(f"Failed: {e}")
 
