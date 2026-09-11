@@ -100,14 +100,16 @@ if section == "0":
     st.divider()
     st.subheader("Add dummy adjudicators & rooms")
     st.caption(
-        "BP needs 1 adjudicator + 1 room per 4 teams. Based on Calico's current "
-        "team count, rounded up. Only fills the shortfall — safe to click repeatedly."
+        "Enter how many adjudicators/rooms you need in total (e.g. from your own "
+        "BP math — 1 per 4 teams, rounded up for byes/swings). Only fills the "
+        "shortfall against what's already on Render — safe to click repeatedly."
     )
 
     col_adj, col_room = st.columns(2)
 
     with col_adj:
         st.markdown("**Adjudicators**")
+        target_adj = st.number_input("Total adjudicators needed", min_value=0, step=1, key="target_adj")
         if st.button("Fill missing adjudicators"):
             with st.spinner("Checking and creating adjudicators..."):
                 status_line = st.empty()
@@ -116,23 +118,24 @@ if section == "0":
                     status_line.write(f"Created {done}/{total}: {name}")
 
                 try:
-                    result = sc.create_dummy_adjudicators(progress_callback=cb)
+                    result = sc.create_dummy_adjudicators(int(target_adj), progress_callback=cb)
                     if result["created"] == 0:
                         st.success(
                             f"Already have {result['existing_before']} — "
-                            f"{result['required']} required. Nothing to add."
+                            f"{result['target']} requested. Nothing to add."
                         )
                     else:
                         st.success(
                             f"Created {result['created']} adjudicator(s) "
                             f"({result['existing_before']} → {result['existing_before'] + result['created']}, "
-                            f"{result['required']} required)."
+                            f"{result['target']} requested)."
                         )
                 except Exception as e:
                     st.error(f"Failed: {e}")
 
     with col_room:
         st.markdown("**Rooms**")
+        target_room = st.number_input("Total rooms needed", min_value=0, step=1, key="target_room")
         if st.button("Fill missing rooms"):
             with st.spinner("Checking and creating rooms..."):
                 status_line = st.empty()
@@ -141,17 +144,17 @@ if section == "0":
                     status_line.write(f"Created {done}/{total}: {name}")
 
                 try:
-                    result = sc.create_dummy_venues(progress_callback=cb)
+                    result = sc.create_dummy_venues(int(target_room), progress_callback=cb)
                     if result["created"] == 0:
                         st.success(
                             f"Already have {result['existing_before']} — "
-                            f"{result['required']} required. Nothing to add."
+                            f"{result['target']} requested. Nothing to add."
                         )
                     else:
                         st.success(
                             f"Created {result['created']} room(s) "
                             f"({result['existing_before']} → {result['existing_before'] + result['created']}, "
-                            f"{result['required']} required)."
+                            f"{result['target']} requested)."
                         )
                 except Exception as e:
                     st.error(f"Failed: {e}")
