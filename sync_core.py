@@ -412,3 +412,68 @@ def count_render_pairings_with_results(round_seq):
     """
     pairings = get_render_pairings(round_seq)
     return sum(1 for p in pairings if p.get("result_status") == "C")
+
+
+# ---------------------------------------------------------------------------
+# Dummy adjudicator / venue fill-in (Section 0)
+# ---------------------------------------------------------------------------
+
+import math
+
+
+def required_adj_and_room_count():
+    """
+    BP: 4 teams per room, 1 adj per room. Uses Calico's team count as the
+    source of truth (that's what actually determines room/adj needs),
+    rounding up for byes/swings.
+    """
+    calico_teams = get_calico_team_count()
+    return math.ceil(calico_teams / 4) if calico_teams else 0
+
+
+def get_render_venue_count():
+    return len(render_get("/venues"))
+
+
+def create_dummy_venues(progress_callback=None):
+    """
+    Idempotent: only creates the shortfall between required and existing
+    Render venues, numbered continuing on from the current count (doesn't
+    restart at 1 if some already exist).
+    """
+    required = required_adj_and_room_count()
+    existing = get_render_venue_count()
+    to_create = max(required - existing, 0)
+
+    created = []
+    for i in range(to_create):
+        n = existing + i + 1
+        payload = {"name": f"Room {n}", "priority": n}
+        result = render_post("/venues", payload)
+        created.append(result)
+        if progress_callback:
+            progress_callback(i + 1, to_create, f"Room {n}")
+
+    return {"required": required, "existing_before": existing, "created": len(created)}
+
+
+def create_dummy_adjudicators(progress_callback=None):
+    """
+    Idempotent: only creates the shortfall between required and existing
+    Render adjudicators. Name only - everything else left at Tabbycat's
+    defaults.
+    """
+    required = required_adj_and_room_count()
+    existing = get_render_adjudicator_count()
+    to_create = max(required - existing, 0)
+
+    created = []
+    for i in range(to_create):
+        n = existing + i + 1
+        payload = {"name": f"Adj {n}", "base_score": 7, "trainee": False}
+        result = render_post("/adjudicators", payload)
+        created.append(result)
+        if progress_callback:
+            progress_callback(i + 1, to_create, f"Adj {n}")
+
+    return {"required": required, "existing_before": existing, "created": len(created)}
