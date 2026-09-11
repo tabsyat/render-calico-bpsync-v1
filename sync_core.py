@@ -346,3 +346,69 @@ def push_draw_to_calico(round_seq, team_map, mark_as_draft=True, progress_callba
         mark_calico_draft(round_seq)
 
     return {"pushed": pushed}
+
+
+# ---------------------------------------------------------------------------
+# Section 0 - overview / reference counts, and shared duplicate-check helpers
+# ---------------------------------------------------------------------------
+
+def get_calico_team_count():
+    return len(calico_get("/teams"))
+
+
+def get_render_team_count():
+    return len(render_get("/teams"))
+
+
+def get_calico_adjudicator_count():
+    return len(calico_get("/adjudicators"))
+
+
+def get_render_adjudicator_count():
+    return len(render_get("/adjudicators"))
+
+
+def get_overview_counts():
+    """Used by Section 0's Sync button - a reference dashboard, not a gate."""
+    return {
+        "calico_teams": get_calico_team_count(),
+        "render_teams": get_render_team_count(),
+        "calico_adjs": get_calico_adjudicator_count(),
+        "render_adjs": get_render_adjudicator_count(),
+    }
+
+
+def check_team_import_readiness():
+    """
+    Mandatory check run by Section 1's import button itself (not skippable
+    by not visiting Section 0). Returns (calico_count, render_count, status,
+    message) where status is one of:
+      "empty_source"  - Calico has 0 teams, importing would do nothing
+      "ready"         - Render has 0 teams, safe to import
+      "duplicate_risk"- counts match, teams likely already imported
+      "partial"       - Render has some but not all teams, likely a partial/failed prior run
+    """
+    x = get_calico_team_count()
+    y = get_render_team_count()
+
+    if x == 0:
+        return x, y, "empty_source", "Calico has no teams yet — importing would copy nothing."
+    if y == 0:
+        return x, y, "ready", "Teams are ready to copy!"
+    if x == y:
+        return x, y, "duplicate_risk", "Teams already exist on Render — please double check before importing again."
+    return x, y, "partial", (
+        "Some teams are not migrated to Render — please delete all teams on Render "
+        "and re-run the import."
+    )
+
+
+def count_render_pairings_with_results(round_seq):
+    """
+    Proxy for 'results already recorded this round' - counts Render
+    pairings whose result_status is 'C' (confirmed). Used by Section 2's
+    mandatory pre-push check, since adjudicators sometimes file double
+    ballots and a silent re-push could duplicate them.
+    """
+    pairings = get_render_pairings(round_seq)
+    return sum(1 for p in pairings if p.get("result_status") == "C")
