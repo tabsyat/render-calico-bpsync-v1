@@ -19,14 +19,17 @@ On Render:     started via render.yaml's startCommand
 import streamlit as st
 import sync_core as sc
 
-st.set_page_config(
-    page_title="Render <-> Calico Sync",
-    layout="centered",
-    menu_items={},  # hides Print / Record a screencast / About - not useful here
-)
+st.set_page_config(page_title="Render <-> Calico Sync", layout="centered")
+
+# Streamlit doesn't expose an official API to remove individual entries
+# (Print, Record a screencast) from the top-right "..." menu - only whole
+# categories via menu_items. This CSS hides the whole menu button as the
+# only reliable way to drop those two; Rerun/Settings go with it.
+# If you'd rather keep Rerun/Settings and live with Print/Record, delete
+# this block.
+st.markdown("<style>#MainMenu {visibility: hidden;}</style>", unsafe_allow_html=True)
 
 st.title("Render ↔ Calico Tabbycat Sync")
-st.caption("IDL per-round draw/results sync tool")
 
 try:
     sc.load_config()
@@ -38,33 +41,32 @@ except sc.ConfigError as e:
     )
     st.stop()
 
-SECTIONS = [
-    ("0", "Overview", "Reference dashboard — tournament info and current counts. Not required, just a sanity check."),
-    ("1", "Import Teams", "One-time: copy all teams from Calico to Render, before Round 1."),
-    ("3", "Review Pause", "Confirm you've reviewed the generated draw on Render's UI."),
-    ("4", "Push Draw → Calico", "Push the reviewed draw from Render to Calico."),
-    ("2", "Pull Results → Render", "After a round is played on Calico, pull confirmed results into Render."),
-]
+SECTION_DESCRIPTIONS = {
+    "0": "Reference dashboard: Tournament info and current counts. Not required, just a sanity check.",
+    "1": "One-time: copy all teams from Calico to Render, before Round 1.",
+    "3": "Confirm you've reviewed the generated draw on Render's UI.",
+    "4": "Push the reviewed draw from Render to Calico.",
+    "2": "After a round is played on Calico, pull confirmed results into Render.",
+}
 
-if "active_section" not in st.session_state:
-    st.session_state.active_section = "0"
-
-st.sidebar.markdown("### Section")
-for num, title, desc in SECTIONS:
-    is_active = st.session_state.active_section == num
-    if st.sidebar.button(f"{num}. {title}", key=f"nav_{num}",
-                          type="primary" if is_active else "secondary",
-                          use_container_width=True):
-        st.session_state.active_section = num
-    st.sidebar.caption(desc)
-
-section = st.session_state.active_section
+section = st.sidebar.radio(
+    "Section",
+    ["0", "1", "3", "4", "2"],
+    format_func=lambda s: {
+        "0": "0. Overview",
+        "1": "1. Import Teams",
+        "3": "3. Review Pause",
+        "4": "4. Push Draw → Calico",
+        "2": "2. Pull Results → Render",
+    }[s],
+)
 
 # ---------------------------------------------------------------------------
 # Section 0 - Overview (reference only, never gates anything)
 # ---------------------------------------------------------------------------
 if section == "0":
     st.header("Section 0 — Overview")
+    st.caption(SECTION_DESCRIPTIONS["0"])
     st.markdown(
         f"**Render instance:** `{sc.RENDER_URL}`\n\n"
         f"**Calico instance:** `{sc.CALICO_URL}`"
@@ -96,10 +98,12 @@ if section == "0":
         st.info("Click 'Sync counts' to fetch current numbers from both instances.")
 
 # ---------------------------------------------------------------------------
-# Section 1 - Import Teams (mandatory live duplicate-check baked into the button)
+# Section 1 - Import Teams (mandatory live check, but never blocks the button -
+# warnings are advisory and can be overridden)
 # ---------------------------------------------------------------------------
 elif section == "1":
     st.header("Section 1 — One-time Team Import")
+    st.caption(SECTION_DESCRIPTIONS["1"])
     st.warning("Run this once only, before Round 1. Re-running will create duplicate teams.")
 
     @st.dialog("Team count check")
@@ -116,25 +120,30 @@ elif section == "1":
 
         if status == "ready":
             st.success(message)
-            if st.button("Proceed with Import", type="primary"):
-                progress = st.progress(0.0)
-                status_line = st.empty()
-
-                def cb(done, total, name):
-                    progress.progress(done / total)
-                    status_line.write(f"Created team {done}/{total}: {name}")
-
-                try:
-                    team_map = sc.import_teams(progress_callback=cb)
-                    st.success(f"Imported {len(team_map)} teams. team_map.json written.")
-                except Exception as e:
-                    st.error(f"Import failed: {e}")
+            button_label = "Proceed with Import"
         elif status == "empty_source":
             st.warning(message)
+            button_label = "Override warning and go ahead with team import"
         elif status == "duplicate_risk":
             st.error(message)
-        elif status == "partial":
+            button_label = "Override warning and go ahead with team import"
+        else:  # partial
             st.warning(message)
+            button_label = "Override warning and go ahead with team import"
+
+        if st.button(button_label, type="primary"):
+            progress = st.progress(0.0)
+            status_line = st.empty()
+
+            def cb(done, total, name):
+                progress.progress(done / total)
+                status_line.write(f"Created team {done}/{total}: {name}")
+
+            try:
+                team_map = sc.import_teams(progress_callback=cb)
+                st.success(f"Imported {len(team_map)} teams. team_map.json written.")
+            except Exception as e:
+                st.error(f"Import failed: {e}")
 
     if st.button("Run Team Import", type="primary"):
         import_check_dialog()
@@ -147,6 +156,7 @@ elif section == "1":
 # ---------------------------------------------------------------------------
 elif section == "3":
     st.header("Section 3 — Manual Review")
+    st.caption(SECTION_DESCRIPTIONS["3"])
     st.markdown(
         "Go to **Render's Tabbycat UI**, generate the draw for the next round, "
         "and review it there (adjudicator allocation, venues, etc. are **not synced** "
@@ -166,6 +176,7 @@ elif section == "3":
 # ---------------------------------------------------------------------------
 elif section == "4":
     st.header("Section 4 — Pull Render's Draw → Push to Calico")
+    st.caption(SECTION_DESCRIPTIONS["4"])
 
     if not st.session_state.get("reviewed"):
         st.warning("Please complete Section 3 (Review Pause) first.")
@@ -206,6 +217,7 @@ elif section == "4":
 # ---------------------------------------------------------------------------
 elif section == "2":
     st.header("Section 2 — Pull Confirmed Calico Results → Write to Render")
+    st.caption(SECTION_DESCRIPTIONS["2"])
 
     round_seq = st.number_input("Round number", min_value=1, step=1, value=1)
 
