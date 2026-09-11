@@ -453,45 +453,52 @@ def get_render_venue_count():
     return len(render_get("/venues"))
 
 
-def create_dummy_venues(progress_callback=None):
+def create_dummy_venues(target_count, progress_callback=None):
     """
-    Idempotent: only creates the shortfall between required and existing
-    Render venues, numbered continuing on from the current count (doesn't
-    restart at 1 if some already exist).
+    Idempotent: only creates the shortfall between the manually-entered
+    target_count and existing Render venues, numbered continuing on from
+    the current count.
     """
-    required = required_adj_and_room_count()
     existing = get_render_venue_count()
-    to_create = max(required - existing, 0)
+    to_create = max(target_count - existing, 0)
 
     created = []
     for i in range(to_create):
         n = existing + i + 1
-        payload = {"name": f"Room {n}", "priority": n}
+        payload = {"name": f"Room {n}", "priority": n, "categories": []}
         result = render_post("/venues", payload)
         created.append(result)
         if progress_callback:
             progress_callback(i + 1, to_create, f"Room {n}")
 
-    return {"required": required, "existing_before": existing, "created": len(created)}
+    return {"target": target_count, "existing_before": existing, "created": len(created)}
 
 
-def create_dummy_adjudicators(progress_callback=None):
+def create_dummy_adjudicators(target_count, progress_callback=None):
     """
-    Idempotent: only creates the shortfall between required and existing
-    Render adjudicators. Name only - everything else left at Tabbycat's
-    defaults.
+    Idempotent: only creates the shortfall between the manually-entered
+    target_count and existing Render adjudicators. Chair-level base_score,
+    not trainee - everything else left empty (Tabbycat requires the keys
+    present even when there's nothing to put in them).
     """
-    required = required_adj_and_room_count()
     existing = get_render_adjudicator_count()
-    to_create = max(required - existing, 0)
+    to_create = max(target_count - existing, 0)
 
     created = []
     for i in range(to_create):
         n = existing + i + 1
-        payload = {"name": f"Adj {n}", "base_score": 7, "trainee": False}
+        payload = {
+            "name": f"Adj {n}",
+            "base_score": 7,
+            "trainee": False,
+            "institution": None,
+            "institution_conflicts": [],
+            "team_conflicts": [],
+            "adjudicator_conflicts": [],
+        }
         result = render_post("/adjudicators", payload)
         created.append(result)
         if progress_callback:
             progress_callback(i + 1, to_create, f"Adj {n}")
 
-    return {"required": required, "existing_before": existing, "created": len(created)}
+    return {"target": target_count, "existing_before": existing, "created": len(created)}
