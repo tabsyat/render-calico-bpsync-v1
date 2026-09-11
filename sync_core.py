@@ -66,39 +66,57 @@ def _headers(token):
     return {"Authorization": f"Token {token}", "Content-Type": "application/json"}
 
 
+def _raise_with_body(response):
+    try:
+        detail = response.json()
+    except ValueError:
+        detail = response.text
+    response_error = requests.HTTPError(
+        f"{response.status_code} {response.reason} for url: {response.url}\nResponse body: {detail}",
+        response=response,
+    )
+    raise response_error
+
+
 def render_get(path):
     r = requests.get(f"{RENDER_URL}{path}", headers=_headers(RENDER_TOKEN))
-    r.raise_for_status()
+    if not r.ok:
+        _raise_with_body(r)
     return r.json()
 
 
 def render_post(path, payload):
     r = requests.post(f"{RENDER_URL}{path}", headers=_headers(RENDER_TOKEN), json=payload)
-    r.raise_for_status()
+    if not r.ok:
+        _raise_with_body(r)
     return r.json()
 
 
 def render_patch(path, payload):
     r = requests.patch(f"{RENDER_URL}{path}", headers=_headers(RENDER_TOKEN), json=payload)
-    r.raise_for_status()
+    if not r.ok:
+        _raise_with_body(r)
     return r.json()
 
 
 def calico_get(path):
     r = requests.get(f"{CALICO_URL}{path}", headers=_headers(CALICO_TOKEN))
-    r.raise_for_status()
+    if not r.ok:
+        _raise_with_body(r)
     return r.json()
 
 
 def calico_post(path, payload):
     r = requests.post(f"{CALICO_URL}{path}", headers=_headers(CALICO_TOKEN), json=payload)
-    r.raise_for_status()
+    if not r.ok:
+        _raise_with_body(r)
     return r.json()
 
 
 def calico_patch(path, payload):
     r = requests.patch(f"{CALICO_URL}{path}", headers=_headers(CALICO_TOKEN), json=payload)
-    r.raise_for_status()
+    if not r.ok:
+        _raise_with_body(r)
     return r.json()
 
 
