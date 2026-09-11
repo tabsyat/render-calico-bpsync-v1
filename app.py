@@ -5,12 +5,12 @@ Streamlit front end for the Render <-> Calico Tabbycat sync tool.
 Wraps sync_core.py (ported from Render_Calico_Sync_v2.ipynb).
 
 Sections are numbered by their actual position in the flow, not the
-original notebook's numbering:
-    0. Overview          - reference dashboard only, not a gate
-    1. Import Teams       - once, before Round 1
-    2. Review Pause         -\
-    3. Push Draw -> Calico     > repeats every round, in this order
-    4. Pull Results -> Render -/
+original notebook's numbering. Review Pause is folded directly into the
+Push Draw section rather than being a separate standalone step:
+    0. Overview            - reference dashboard only, not a gate
+    1. Import Teams         - once, before Round 1
+    2. Review + Push Draw     - repeats every round, in this order
+    3. Pull Results -> Render -/
 
 Run locally:   streamlit run app.py
 On Render:     started via render.yaml's startCommand
@@ -45,20 +45,18 @@ except sc.ConfigError as e:
 SECTION_DESCRIPTIONS = {
     "0": "Reference dashboard — tournament info and current counts. Not required, just a sanity check.",
     "1": "One-time: copy all teams from Calico to Render, before Round 1.",
-    "2": "Confirm you've reviewed the generated draw on Render's UI.",
-    "3": "Push the reviewed draw from Render to Calico.",
-    "4": "After a round is played on Calico, pull confirmed results into Render.",
+    "2": "Review the generated draw on Render's UI, then push it to Calico.",
+    "3": "After a round is played on Calico, pull confirmed results into Render.",
 }
 
 section = st.sidebar.radio(
     "Section",
-    ["0", "1", "2", "3", "4"],
+    ["0", "1", "2", "3"],
     format_func=lambda s: {
         "0": "0. Overview",
         "1": "1. Import Teams",
-        "2": "2. Review Pause",
-        "3": "3. Push Draw → Calico",
-        "4": "4. Pull Results → Render",
+        "2": "2. Push Draw → Calico",
+        "3": "3. Pull Results → Render",
     }[s],
 )
 
@@ -272,35 +270,25 @@ elif section == "1":
                "any time to double check the numbers match your expectations.")
 
 # ---------------------------------------------------------------------------
-# Section 2 - Review Pause
+# Section 2 - Review draw and Push to Calico (merged)
 # ---------------------------------------------------------------------------
 elif section == "2":
-    st.header("Section 2 — Manual Review")
+    st.header("Section 2 — Review Draw → Push to Calico")
     st.caption(SECTION_DESCRIPTIONS["2"])
     st.markdown(
         "Go to **Render's Tabbycat UI**, generate the draw for the next round, "
         "and review it there (adjudicator allocation, venues, etc. are **not synced** "
         "by this tool — assign them on Render or directly on Calico afterward).\n\n"
-        "Once you're happy with it, tick the box below. Section 3 won't be usable "
-        "until you do."
+        "Once you're happy with it, tick the box below to unlock pushing it to Calico."
     )
     reviewed = st.checkbox("I've generated and reviewed the draw on Render's UI ✅")
-    st.session_state["reviewed"] = reviewed
-    if reviewed:
-        st.success("Review confirmed. You can proceed to Section 3.")
-    else:
+
+    if not reviewed:
         st.info("Waiting for review confirmation.")
-
-# ---------------------------------------------------------------------------
-# Section 3 - Push Draw -> Calico
-# ---------------------------------------------------------------------------
-elif section == "3":
-    st.header("Section 3 — Pull Render's Draw → Push to Calico")
-    st.caption(SECTION_DESCRIPTIONS["3"])
-
-    if not st.session_state.get("reviewed"):
-        st.warning("Please complete Section 2 (Review Pause) first.")
         st.stop()
+
+    st.success("Review confirmed.")
+    st.divider()
 
     round_seq = st.number_input("Round number", min_value=1, step=1, value=1, key="push_round")
     mark_as_draft = st.checkbox(
@@ -333,11 +321,11 @@ elif section == "3":
             st.error(f"Failed: {e}")
 
 # ---------------------------------------------------------------------------
-# Section 4 - Pull Results -> Render (mandatory pre-push confirmation)
+# Section 3 - Pull Results -> Render (mandatory pre-push confirmation)
 # ---------------------------------------------------------------------------
-elif section == "4":
-    st.header("Section 4 — Pull Confirmed Calico Results → Write to Render")
-    st.caption(SECTION_DESCRIPTIONS["4"])
+elif section == "3":
+    st.header("Section 3 — Pull Confirmed Calico Results → Write to Render")
+    st.caption(SECTION_DESCRIPTIONS["3"])
 
     round_seq = st.number_input("Round number", min_value=1, step=1, value=1)
 
