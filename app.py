@@ -1,33 +1,8 @@
-"""
-app.py
-
-Streamlit front end for the Render <-> Calico Tabbycat sync tool.
-Wraps sync_core.py (ported from Render_Calico_Sync_v2.ipynb).
-
-Sections are numbered by their actual position in the flow, not the
-original notebook's numbering. Review Pause is folded directly into the
-Push Draw section rather than being a separate standalone step:
-    0. Overview            - reference dashboard only, not a gate
-    1. Import Teams         - once, before Round 1
-    2. Review + Push Draw     - repeats every round, in this order
-    3. Pull Results -> Render -/
-
-Run locally:   streamlit run app.py
-On Render:     started via render.yaml's startCommand
-"""
-
 import streamlit as st
 import json
 import sync_core as sc
 
 st.set_page_config(page_title="Render <-> Calico Sync", layout="centered")
-
-# Streamlit doesn't expose an official API to remove individual entries
-# (Print, Record a screencast) from the top-right "..." menu - only whole
-# categories via menu_items. This CSS hides the whole menu button as the
-# only reliable way to drop those two; Rerun/Settings go with it.
-# If you'd rather keep Rerun/Settings and live with Print/Record, delete
-# this block.
 st.markdown("<style>#MainMenu {visibility: hidden;}</style>", unsafe_allow_html=True)
 
 st.title("Render ↔ Calico Tabbycat Sync")
@@ -43,10 +18,10 @@ except sc.ConfigError as e:
     st.stop()
 
 SECTION_DESCRIPTIONS = {
-    "0": "Reference dashboard — tournament info and current counts. Not required, just a sanity check.",
+    "0": "Reference dashboard: Tournament info and current counts.",
     "1": "One-time: copy all teams from Calico to Render, before Round 1.",
     "2": "Review the generated draw on Render's UI, then push it to Calico.",
-    "3": "After a round is played on Calico, pull confirmed results into Render.",
+    "3": "After a round is completed on Calico, pull confirmed results into Render.",
 }
 
 section = st.sidebar.radio(
@@ -60,9 +35,6 @@ section = st.sidebar.radio(
     }[s],
 )
 
-# ---------------------------------------------------------------------------
-# Section 0 - Overview (reference only, never gates anything)
-# ---------------------------------------------------------------------------
 if section == "0":
     st.header("Section 0 — Overview")
     st.caption(SECTION_DESCRIPTIONS["0"])
@@ -71,7 +43,7 @@ if section == "0":
         f"**Calico instance:** `{sc.CALICO_URL}`"
     )
     st.caption(
-        "This is a reference dashboard only — it doesn't block or gate any "
+        "This is a reference dashboard only. It doesn't block or gate any "
         "other section. Section 1's import button always runs its own "
         "live check regardless of what's shown here."
     )
@@ -99,7 +71,6 @@ if section == "0":
     st.divider()
     st.subheader("team_map.json backup / restore")
     st.caption(
-        "Render's filesystem is not guaranteed to persist across deploys/restarts. "
         "After Section 1 finishes, download team_map.json and keep it somewhere safe. "
         "If it's ever missing (Sections 2 and 3 will error saying so), re-upload it here."
     )
@@ -127,8 +98,7 @@ if section == "0":
     st.divider()
     st.subheader("Add dummy adjudicators & rooms")
     st.caption(
-        "BP math — 1 per 4 teams, rounded up for byes/swings). Only fills the "
-        "shortfall against what's already on Render — safe to click repeatedly."
+        "Only fills the shortfall against what's already on Render."
     )
 
     col_adj, col_room = st.columns(2)
@@ -185,10 +155,6 @@ if section == "0":
                 except Exception as e:
                     st.error(f"Failed: {e}")
 
-# ---------------------------------------------------------------------------
-# Section 1 - Import Teams (mandatory live check, but never blocks the button -
-# warnings are advisory and can be overridden)
-# ---------------------------------------------------------------------------
 elif section == "1":
     st.header("Section 1 — One-time Team Import")
     st.caption(SECTION_DESCRIPTIONS["1"])
@@ -233,7 +199,7 @@ elif section == "1":
 
         elif status == "duplicate_risk":
             st.error(info)
-            st.caption("All Calico teams already exist on Render by reference — nothing to import.")
+            st.caption("All Calico teams already exist on Render by reference. Nothing to import.")
 
         elif status == "partial":
             missing = info  # list of Calico team dicts still missing on Render
@@ -266,22 +232,19 @@ elif section == "1":
     if st.button("Run Team Import", type="primary"):
         import_check_dialog()
 
-    st.caption("Clicking this always re-checks live counts first — go back to Section 0 "
+    st.caption("Clicking this always re-checks live counts first. Go back to Section 0 "
                "any time to double check the numbers match your expectations.")
 
-# ---------------------------------------------------------------------------
-# Section 2 - Review draw and Push to Calico (merged)
-# ---------------------------------------------------------------------------
 elif section == "2":
     st.header("Section 2 — Review Draw → Push to Calico")
     st.caption(SECTION_DESCRIPTIONS["2"])
     st.markdown(
         "Go to **Render's Tabbycat UI**, generate the draw for the next round, "
         "and review it there (adjudicator allocation, venues, etc. are **not synced** "
-        "by this tool — assign them on Render or directly on Calico afterward).\n\n"
+        "by this tool, assign them on Render or directly on Calico afterward).\n\n"
         "Once you're happy with it, tick the box below to unlock pushing it to Calico."
     )
-    reviewed = st.checkbox("I've generated and reviewed the draw on Render's UI ✅")
+    reviewed = st.checkbox("I've generated and reviewed the draw on Render's UI")
 
     if not reviewed:
         st.info("Waiting for review confirmation.")
@@ -305,7 +268,7 @@ elif section == "2":
         try:
             team_map = sc.load_team_map()
             if not team_map:
-                st.error("team_map.json not found — run Section 1 first.")
+                st.error("team_map.json not found — run Section 1 first or re-upload team_map.json.")
                 st.stop()
             team_map = {int(k): v for k, v in team_map.items()}
 
@@ -314,15 +277,12 @@ elif section == "2":
             )
             st.success(f"Pushed {len(result['pushed'])} pairing(s) to Calico.")
             if mark_as_draft:
-                st.info("Round marked as Draft on Calico — release it manually when ready.")
+                st.info("Round marked as Draft on Calico. Release it manually when ready.")
             else:
                 st.info("MARK_AS_DRAFT was off — set draw_status on Calico manually if needed.")
         except Exception as e:
             st.error(f"Failed: {e}")
 
-# ---------------------------------------------------------------------------
-# Section 3 - Pull Results -> Render (mandatory pre-push confirmation)
-# ---------------------------------------------------------------------------
 elif section == "3":
     st.header("Section 3 — Pull Confirmed Calico Results → Write to Render")
     st.caption(SECTION_DESCRIPTIONS["3"])
