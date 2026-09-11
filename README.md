@@ -6,7 +6,7 @@ tournament judges/teams interact with).
 
 ## Deploy your own copy
 
-1. Click **Deploy to Render** (button below, once this repo is public):
+1. Click **Deploy to Render**
 
    [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy)
 
