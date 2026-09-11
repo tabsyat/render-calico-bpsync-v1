@@ -17,6 +17,7 @@ On Render:     started via render.yaml's startCommand
 """
 
 import streamlit as st
+import json
 import sync_core as sc
 
 st.set_page_config(page_title="Render <-> Calico Sync", layout="centered")
@@ -98,9 +99,36 @@ if section == "0":
         st.info("Click 'Sync counts' to fetch current numbers from both instances.")
 
     st.divider()
+    st.subheader("team_map.json backup / restore")
+    st.caption(
+        "Render's filesystem is not guaranteed to persist across deploys/restarts. "
+        "After Section 1 finishes, download team_map.json and keep it somewhere safe. "
+        "If it's ever missing (Sections 2 and 3 will error saying so), re-upload it here."
+    )
+    existing_map = sc.load_team_map()
+    if existing_map:
+        st.success(f"team_map.json currently present on this instance ({len(existing_map)} teams mapped).")
+        st.download_button(
+            "Download current team_map.json",
+            data=json.dumps(existing_map, indent=2),
+            file_name="team_map.json",
+            mime="application/json",
+        )
+    else:
+        st.warning("No team_map.json currently found on this instance.")
+
+    uploaded = st.file_uploader("Restore team_map.json", type="json")
+    if uploaded is not None:
+        try:
+            restored = json.loads(uploaded.read())
+            restored = {int(k): v for k, v in restored.items()}
+            sc.save_team_map(restored)
+            st.success(f"Restored team_map.json with {len(restored)} team mapping(s).")
+        except Exception as e:
+            st.error(f"Failed to restore: {e}")
+    st.divider()
     st.subheader("Add dummy adjudicators & rooms")
     st.caption(
-        "Enter how many adjudicators/rooms you need in total (e.g. from your own "
         "BP math — 1 per 4 teams, rounded up for byes/swings). Only fills the "
         "shortfall against what's already on Render — safe to click repeatedly."
     )
@@ -172,7 +200,7 @@ elif section == "1":
     def import_check_dialog():
         with st.spinner("Checking team counts on Calico and Render..."):
             try:
-                x, y, status, message = sc.check_team_import_readiness()
+                x, y, status, info = sc.check_team_import_readiness()
             except Exception as e:
                 st.error(f"Check failed: {e}")
                 return
@@ -181,31 +209,61 @@ elif section == "1":
         st.markdown(f"**Render's Teams = {y}**")
 
         if status == "ready":
-            st.success(message)
-            button_label = "Proceed with Import"
+            st.success("Teams are ready to copy!")
+            if st.button("Proceed with Import", type="primary"):
+                progress = st.progress(0.0)
+                status_line = st.empty()
+
+                def cb(done, total, name):
+                    progress.progress(done / total)
+                    status_line.write(f"Created team {done}/{total}: {name}")
+
+                try:
+                    team_map = sc.import_teams(progress_callback=cb)
+                    st.success(f"Imported {len(team_map)} teams. team_map.json written.")
+                    st.download_button(
+                        "Download team_map.json (keep this safe!)",
+                        data=json.dumps(team_map, indent=2),
+                        file_name="team_map.json",
+                        mime="application/json",
+                    )
+                except Exception as e:
+                    st.error(f"Import failed: {e}")
+
         elif status == "empty_source":
-            st.warning(message)
-            button_label = "Override warning and go ahead with team import"
+            st.warning(info)
+
         elif status == "duplicate_risk":
-            st.error(message)
-            button_label = "Override warning and go ahead with team import"
-        else:  # partial
-            st.warning(message)
-            button_label = "Override warning and go ahead with team import"
+            st.error(info)
+            st.caption("All Calico teams already exist on Render by reference — nothing to import.")
 
-        if st.button(button_label, type="primary"):
-            progress = st.progress(0.0)
-            status_line = st.empty()
+        elif status == "partial":
+            missing = info  # list of Calico team dicts still missing on Render
+            st.warning(
+                f"{len(missing)} of {x} teams are missing on Render: "
+                + ", ".join(t["reference"] for t in missing[:10])
+                + (", ..." if len(missing) > 10 else "")
+            )
+            if st.button("Fill remaining teams", type="primary"):
+                progress = st.progress(0.0)
+                status_line = st.empty()
 
-            def cb(done, total, name):
-                progress.progress(done / total)
-                status_line.write(f"Created team {done}/{total}: {name}")
+                def cb(done, total, name):
+                    progress.progress(done / total)
+                    status_line.write(f"Created team {done}/{total}: {name}")
 
-            try:
-                team_map = sc.import_teams(progress_callback=cb)
-                st.success(f"Imported {len(team_map)} teams. team_map.json written.")
-            except Exception as e:
-                st.error(f"Import failed: {e}")
+                try:
+                    missing_ids = [t["id"] for t in missing]
+                    team_map = sc.import_teams(progress_callback=cb, only_calico_ids=missing_ids)
+                    st.success(f"Created {len(missing_ids)} missing team(s). team_map.json updated.")
+                    st.download_button(
+                        "Download team_map.json (keep this safe!)",
+                        data=json.dumps(team_map, indent=2),
+                        file_name="team_map.json",
+                        mime="application/json",
+                    )
+                except Exception as e:
+                    st.error(f"Import failed: {e}")
 
     if st.button("Run Team Import", type="primary"):
         import_check_dialog()
