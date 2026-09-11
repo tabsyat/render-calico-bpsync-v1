@@ -1,3 +1,27 @@
+"""
+sync_core.py
+
+Core Render <-> Calico Tabbycat sync logic for IDL tournaments.
+Ported line-for-line from the working Colab notebook
+(Render_Calico_Sync_v2.ipynb) - same payload shapes, same endpoints,
+same no-trailing-slash conventions confirmed live by Chirag.
+
+Secrets are read from environment variables instead of Colab's
+userdata.get(), everything else is unchanged.
+
+Required env vars (no trailing slash on the URLs):
+    RENDER_URL, RENDER_TOKEN, CALICO_URL, CALICO_TOKEN
+
+*** RECONSTRUCTED FUNCTIONS - VERIFY AGAINST YOUR ORIGINALS ***
+The notebook export calls get_calico_pairings(), get_confirmed_ballot(),
+extract_calico_team_id(), and build_render_pairing_lookup() without
+defining them in any visible cell (likely defined in a cell that didn't
+make it into the export, or run earlier in the session). The versions
+below are inferred from how they're *called* elsewhere in the notebook.
+They are marked with RECONSTRUCTED comments - please check them against
+your real versions before relying on this in production.
+"""
+
 import os
 import json
 import requests
@@ -30,12 +54,40 @@ CALICO_URL = None
 CALICO_TOKEN = None
 
 
+def normalize_tournament_api_url(raw_url: str) -> str:
+    """
+    Accepts any of the following, and returns the full API path form:
+      1. https://host/api/v1/tournaments/slug        (already full - used as-is)
+      2. https://host/slug                            (simple form - expanded)
+      3. Either of the above with a trailing slash    (stripped first)
+
+    This makes env var setup forgiving of pasting straight from a
+    tournament's public URL bar, which always includes the trailing
+    slash Tabbycat's site adds.
+    """
+    url = raw_url.strip().rstrip("/")
+
+    if "/api/v1/tournaments/" in url:
+        # Already the full API path form - use as-is.
+        return url
+
+    # Simple form: last path segment is the slug, everything before it
+    # is the host. e.g. https://host.com/testbp -> host=https://host.com, slug=testbp
+    host, _, slug = url.rpartition("/")
+    if not host or not slug:
+        raise ConfigError(
+            f"Could not parse tournament URL: '{raw_url}'. Expected either "
+            f"'https://host/slug' or 'https://host/api/v1/tournaments/slug'."
+        )
+    return f"{host}/api/v1/tournaments/{slug}"
+
+
 def load_config():
     """Call once at app startup. Mirrors Section 0's userdata.get() calls."""
     global RENDER_URL, RENDER_TOKEN, CALICO_URL, CALICO_TOKEN
-    RENDER_URL = _get_env("RENDER_URL").rstrip("/")
+    RENDER_URL = normalize_tournament_api_url(_get_env("RENDER_URL"))
     RENDER_TOKEN = _get_env("RENDER_TOKEN")
-    CALICO_URL = _get_env("CALICO_URL").rstrip("/")
+    CALICO_URL = normalize_tournament_api_url(_get_env("CALICO_URL"))
     CALICO_TOKEN = _get_env("CALICO_TOKEN")
 
 
