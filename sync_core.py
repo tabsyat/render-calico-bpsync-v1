@@ -1,11 +1,3 @@
-"""
-sync_core.py
-
-Core Render <-> Calico Tabbycat sync logic for IDL tournaments.
-Ported line-for-line from the working Colab notebook
-(Render_Calico_Sync_v2.ipynb)
-"""
-
 import os
 import json
 import requests
@@ -13,10 +5,6 @@ import requests
 TEAM_MAP_PATH = "team_map.json"
 REQUEST_TIMEOUT = 30  # seconds - prevents an indefinite hang on a cold/hung instance
 
-
-# ---------------------------------------------------------------------------
-# Section 0 - Setup
-# ---------------------------------------------------------------------------
 
 class ConfigError(Exception):
     pass
@@ -39,24 +27,11 @@ CALICO_TOKEN = None
 
 
 def normalize_tournament_api_url(raw_url: str) -> str:
-    """
-    Accepts any of the following, and returns the full API path form:
-      1. https://host/api/v1/tournaments/slug        (already full - used as-is)
-      2. https://host/slug                            (simple form - expanded)
-      3. Either of the above with a trailing slash    (stripped first)
-
-    This makes env var setup forgiving of pasting straight from a
-    tournament's public URL bar, which always includes the trailing
-    slash Tabbycat's site adds.
-    """
     url = raw_url.strip().rstrip("/")
 
     if "/api/v1/tournaments/" in url:
-        # Already the full API path form - use as-is.
         return url
 
-    # Simple form: last path segment is the slug, everything before it
-    # is the host. e.g. https://host.com/testbp -> host=https://host.com, slug=testbp
     host, _, slug = url.rpartition("/")
     if not host or not slug:
         raise ConfigError(
@@ -67,7 +42,6 @@ def normalize_tournament_api_url(raw_url: str) -> str:
 
 
 def load_config():
-    """Call once at app startup. Mirrors Section 0's userdata.get() calls."""
     global RENDER_URL, RENDER_TOKEN, CALICO_URL, CALICO_TOKEN
     RENDER_URL = normalize_tournament_api_url(_get_env("RENDER_URL"))
     RENDER_TOKEN = _get_env("RENDER_TOKEN")
@@ -92,21 +66,10 @@ def _raise_with_body(response):
 
 
 def _is_paginated_envelope(data):
-    """
-    DRF's paginated list response always has both 'results' and 'next'
-    keys (next may be null on the last/only page). A single-object GET
-    (e.g. /teams/{id}) never has this shape, so this check is safe to
-    use as an auto-detect without touching any call sites.
-    """
     return isinstance(data, dict) and "results" in data and "next" in data
 
 
 def _get_json_following_pagination(url, headers):
-    """
-    Fetches url; if the response is a paginated DRF envelope, keeps
-    following 'next' and concatenating 'results' until it's null.
-    Otherwise returns the JSON body unchanged (plain list or single object).
-    """
     r = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
     if not r.ok:
         _raise_with_body(r)
@@ -164,10 +127,6 @@ def calico_patch(path, payload):
     return r.json()
 
 
-# ---------------------------------------------------------------------------
-# team_map.json persistence
-# ---------------------------------------------------------------------------
-
 def load_team_map() -> dict:
     if not os.path.exists(TEAM_MAP_PATH):
         return {}
@@ -179,10 +138,6 @@ def save_team_map(team_map: dict):
     with open(TEAM_MAP_PATH, "w") as f:
         json.dump(team_map, f, indent=2)
 
-
-# ---------------------------------------------------------------------------
-# Section 1 - one-time team import
-# ---------------------------------------------------------------------------
 
 def clean_speaker(sp):
     return {
@@ -210,13 +165,6 @@ def clean_team_payload(team):
 
 
 def import_teams(progress_callback=None, only_calico_ids=None):
-    """
-    Imports teams from Calico to Render. If only_calico_ids is given
-    (a set/list of Calico team ids), only those teams are imported -
-    used to resume a partial import without recreating teams that are
-    already on Render. Merges into (rather than overwrites) any
-    existing team_map.json.
-    """
     calico_teams = calico_get("/teams")
     if only_calico_ids is not None:
         only_calico_ids = set(only_calico_ids)
@@ -234,23 +182,10 @@ def import_teams(progress_callback=None, only_calico_ids=None):
 
 
 def get_render_team_references():
-    """reference -> render team id, for identity-based matching."""
     return {t["reference"]: t["id"] for t in render_get("/teams")}
 
 
 def check_team_import_readiness():
-    """
-    Identity-based (not count-only) readiness check: compares actual
-    team references between Calico and Render, so a coincidental count
-    match isn't mistaken for "already imported", and a partial import
-    can be resumed by reference rather than guessed at.
-
-    Returns (calico_count, render_count, status, info) where info is:
-      - for "partial": the list of Calico teams (full dicts) still
-        missing on Render, so the caller can pass their ids straight
-        into import_teams(only_calico_ids=...)
-      - otherwise: a message string
-    """
     calico_teams = calico_get("/teams")
     calico_refs = {t["reference"]: t for t in calico_teams}
     render_refs = get_render_team_references()
@@ -270,10 +205,6 @@ def check_team_import_readiness():
     return x, y, "partial", missing
 
 
-# ---------------------------------------------------------------------------
-# Section 2 - pull confirmed Calico results -> write to Render
-# ---------------------------------------------------------------------------
-
 _render_team_speakers_cache = {}
 
 
@@ -284,28 +215,17 @@ def get_render_team_speakers(render_team_id):
     return _render_team_speakers_cache[render_team_id]
 
 
-# --- RECONSTRUCTED: not defined in the exported notebook cells ---
 def extract_calico_team_id(team_field):
-    """
-    Calico pairing['teams'][i]['team'] may be a full URL or a bare id
-    depending on endpoint. Handles both.
-    """
     if isinstance(team_field, int):
         return team_field
     return int(str(team_field).rstrip("/").split("/")[-1])
 
 
-# --- RECONSTRUCTED: not defined in the exported notebook cells ---
 def get_calico_pairings(round_seq):
     return calico_get(f"/rounds/{round_seq}/pairings")
 
 
-# --- RECONSTRUCTED: not defined in the exported notebook cells ---
 def get_confirmed_ballot(round_seq, pairing_id):
-    """
-    Fetches ballots for a pairing and returns the highest-version
-    confirmed one, or None if there isn't one yet.
-    """
     ballots = calico_get(f"/rounds/{round_seq}/pairings/{pairing_id}/ballots")
     confirmed = [b for b in ballots if b.get("confirmed")]
     if not confirmed:
@@ -313,13 +233,7 @@ def get_confirmed_ballot(round_seq, pairing_id):
     return max(confirmed, key=lambda b: b.get("version", 0))
 
 
-# --- RECONSTRUCTED: not defined in the exported notebook cells ---
 def build_render_pairing_lookup(round_seq):
-    """
-    Maps frozenset(render_team_ids) -> render_pairing_id, so a Calico
-    pairing can be matched to its Render counterpart by team set rather
-    than by pairing ID (which won't match across the two instances).
-    """
     render_pairings = get_render_pairings(round_seq)
     lookup = {}
     for rp in render_pairings:
@@ -392,10 +306,6 @@ def write_results_to_render(round_seq, team_map, render_lookup, progress_callbac
     return written, skipped
 
 
-# ---------------------------------------------------------------------------
-# Section 4 - pull Render's draw -> push to Calico
-# ---------------------------------------------------------------------------
-
 def get_render_pairings(round_seq):
     return render_get(f"/rounds/{round_seq}/pairings")
 
@@ -440,10 +350,6 @@ def mark_calico_draft(round_seq):
 
 
 def push_draw_to_calico(round_seq, team_map, mark_as_draft=True, progress_callback=None):
-    """
-    High-level Section 4 entry point for the app: refuses to double-post,
-    pushes all pairings, optionally marks Draft. Never sets 'R' (Released).
-    """
     existing = get_calico_existing_pairings(round_seq)
     if existing:
         raise RuntimeError(
@@ -461,18 +367,12 @@ def push_draw_to_calico(round_seq, team_map, mark_as_draft=True, progress_callba
     return {"pushed": pushed}
 
 
-# ---------------------------------------------------------------------------
-# Section 0 - overview / reference counts, and shared duplicate-check helpers
-# ---------------------------------------------------------------------------
-
 def get_render_tournament_name():
-    """RENDER_URL already points at the tournament root - GET it directly."""
     data = render_get("")
     return data.get("name") or data.get("short_name") or "(unnamed tournament)"
 
 
 def get_calico_tournament_name():
-    """CALICO_URL already points at the tournament root - GET it directly."""
     data = calico_get("")
     return data.get("name") or data.get("short_name") or "(unnamed tournament)"
 
@@ -494,7 +394,6 @@ def get_render_adjudicator_count():
 
 
 def get_overview_counts():
-    """Used by Section 0's Sync button - a reference dashboard, not a gate."""
     return {
         "calico_teams": get_calico_team_count(),
         "render_teams": get_render_team_count(),
@@ -508,20 +407,14 @@ def get_overview_counts():
 
 
 def count_render_pairings_with_results(round_seq):
-
     pairings = get_render_pairings(round_seq)
     return sum(1 for p in pairings if p.get("result_status") == "C")
 
-
-# ---------------------------------------------------------------------------
-# Dummy adjudicator / venue fill-in (Section 0)
-# ---------------------------------------------------------------------------
 
 import math
 
 
 def required_adj_and_room_count():
-
     calico_teams = get_calico_team_count()
     return math.ceil(calico_teams / 4) if calico_teams else 0
 
@@ -531,7 +424,6 @@ def get_render_venue_count():
 
 
 def create_dummy_venues(target_count, progress_callback=None):
-
     existing = get_render_venue_count()
     to_create = max(target_count - existing, 0)
 
@@ -548,7 +440,6 @@ def create_dummy_venues(target_count, progress_callback=None):
 
 
 def create_dummy_adjudicators(target_count, progress_callback=None):
-
     existing = get_render_adjudicator_count()
     to_create = max(target_count - existing, 0)
 
@@ -570,3 +461,84 @@ def create_dummy_adjudicators(target_count, progress_callback=None):
             progress_callback(i + 1, to_create, f"Adj {n}")
 
     return {"target": target_count, "existing_before": existing, "created": len(created)}
+
+STANDINGS_METRICS = ["points", "speaks_sum", "firsts", "seconds", "draw_strength"]
+
+
+def _extract_id(url):
+    return int(str(url).rstrip("/").split("/")[-1])
+
+
+def get_render_standings():
+    metrics = ",".join(STANDINGS_METRICS)
+    return render_get(f"/teams/standings?metrics={metrics}")
+
+
+def get_calico_standings():
+    metrics = ",".join(STANDINGS_METRICS)
+    return calico_get(f"/teams/standings?metrics={metrics}")
+
+
+def get_calico_id_to_reference():
+    return {t["id"]: t["reference"] for t in calico_get("/teams")}
+
+
+def _metrics_dict(entry):
+    return {m["metric"]: m["value"] for m in entry["metrics"]}
+
+
+def compare_standings():
+    calico_standings = get_calico_standings()
+    render_standings = get_render_standings()
+    team_map = {int(k): v for k, v in load_team_map().items()}
+    calico_names = get_calico_id_to_reference()
+
+    render_by_id = {_extract_id(e["team"]): e for e in render_standings}
+
+    rows = []
+    for entry in calico_standings:
+        calico_id = _extract_id(entry["team"])
+        name = calico_names.get(calico_id, f"Team {calico_id}")
+        render_id = team_map.get(calico_id)
+        render_entry = render_by_id.get(render_id) if render_id is not None else None
+
+        row = {"team": name, "calico_rank": entry["rank"]}
+
+        if render_entry is None:
+            row["render_rank"] = None
+            row["status"] = "Missing on Render"
+            for m in STANDINGS_METRICS:
+                row[m] = f"{_metrics_dict(entry).get(m)} / —"
+            rows.append(row)
+            continue
+
+        row["render_rank"] = render_entry["rank"]
+        calico_metrics = _metrics_dict(entry)
+        render_metrics = _metrics_dict(render_entry)
+
+        mismatched = entry["rank"] != render_entry["rank"]
+        for m in STANDINGS_METRICS:
+            cv, rv = calico_metrics.get(m), render_metrics.get(m)
+            if cv != rv:
+                mismatched = True
+                row[m] = f"{cv} / {rv}"
+            else:
+                row[m] = str(cv)
+
+        row["status"] = "Mismatch" if mismatched else "Match"
+        rows.append(row)
+
+    matched_ids = {team_map.get(_extract_id(e["team"])) for e in calico_standings}
+    for entry in render_standings:
+        render_id = _extract_id(entry["team"])
+        if render_id not in matched_ids:
+            rows.append({
+                "team": f"Render team {render_id}",
+                "calico_rank": None,
+                "render_rank": entry["rank"],
+                "status": "Missing on Calico",
+                **{m: f"— / {_metrics_dict(entry).get(m)}" for m in STANDINGS_METRICS},
+            })
+
+    all_match = all(r["status"] == "Match" for r in rows)
+    return rows, all_match
