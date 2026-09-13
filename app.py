@@ -1,33 +1,9 @@
-"""
-app.py
-
-Streamlit front end for the Render <-> Calico Tabbycat sync tool.
-Wraps sync_core.py (ported from Render_Calico_Sync_v2.ipynb).
-
-Sections are numbered by their actual position in the flow, not the
-original notebook's numbering. Review Pause is folded directly into the
-Push Draw section rather than being a separate standalone step:
-    0. Overview            - reference dashboard only, not a gate
-    1. Import Teams         - once, before Round 1
-    2. Review + Push Draw     - repeats every round, in this order
-    3. Pull Results -> Render -/
-
-Run locally:   streamlit run app.py
-On Render:     started via render.yaml's startCommand
-"""
-
 import streamlit as st
 import json
 import sync_core as sc
 
 st.set_page_config(page_title="Render <-> Calico Sync", layout="centered")
 
-# Streamlit doesn't expose an official API to remove individual entries
-# (Print, Record a screencast) from the top-right "..." menu - only whole
-# categories via menu_items. This CSS hides the whole menu button as the
-# only reliable way to drop those two; Rerun/Settings go with it.
-# If you'd rather keep Rerun/Settings and live with Print/Record, delete
-# this block.
 st.markdown("<style>#MainMenu {visibility: hidden;}</style>", unsafe_allow_html=True)
 
 st.title("Render ↔ Calico Tabbycat Sync")
@@ -47,22 +23,21 @@ SECTION_DESCRIPTIONS = {
     "1": "One-time: copy all teams from Calico to Render, before Round 1.",
     "2": "Review the generated draw on Render's UI, then push it to Calico.",
     "3": "After a round is played on Calico, pull confirmed results into Render.",
+    "4": "Compare final standings between Calico and Render to confirm they match.",
 }
 
 section = st.sidebar.radio(
     "Section",
-    ["0", "1", "2", "3"],
+    ["0", "1", "2", "3", "4"],
     format_func=lambda s: {
         "0": "0. Overview",
         "1": "1. Import Teams",
         "2": "2. Push Draw → Calico",
         "3": "3. Pull Results → Render",
+        "4": "4. Compare Standings",
     }[s],
 )
 
-# ---------------------------------------------------------------------------
-# Section 0 - Overview (reference only, never gates anything)
-# ---------------------------------------------------------------------------
 if section == "0":
     st.header("Section 0 — Overview")
     st.caption(SECTION_DESCRIPTIONS["0"])
@@ -196,10 +171,6 @@ if section == "0":
                 except Exception as e:
                     st.error(f"Failed: {e}")
 
-# ---------------------------------------------------------------------------
-# Section 1 - Import Teams (mandatory live check, but never blocks the button -
-# warnings are advisory and can be overridden)
-# ---------------------------------------------------------------------------
 elif section == "1":
     st.header("Section 1 — One-time Team Import")
     st.caption(SECTION_DESCRIPTIONS["1"])
@@ -280,9 +251,6 @@ elif section == "1":
     st.caption("Clicking this always re-checks live counts first — go back to Section 0 "
                "any time to double check the numbers match your expectations.")
 
-# ---------------------------------------------------------------------------
-# Section 2 - Review draw and Push to Calico (merged)
-# ---------------------------------------------------------------------------
 elif section == "2":
     st.header("Section 2 — Review Draw → Push to Calico")
     st.caption(SECTION_DESCRIPTIONS["2"])
@@ -331,9 +299,6 @@ elif section == "2":
         except Exception as e:
             st.error(f"Failed: {e}")
 
-# ---------------------------------------------------------------------------
-# Section 3 - Pull Results -> Render (mandatory pre-push confirmation)
-# ---------------------------------------------------------------------------
 elif section == "3":
     st.header("Section 3 — Pull Confirmed Calico Results → Write to Render")
     st.caption(SECTION_DESCRIPTIONS["3"])
@@ -386,3 +351,30 @@ elif section == "3":
         results_check_dialog(int(round_seq))
 
     st.caption("Clicking this always checks Render's existing result count for this round first.")
+
+elif section == "4":
+    st.header("Section 4 — Compare Standings")
+    st.caption(SECTION_DESCRIPTIONS["4"])
+
+    mismatches_first = st.checkbox("Show mismatches first")
+
+    if st.button("Compare Standings", type="primary"):
+        with st.spinner("Fetching standings from both instances..."):
+            try:
+                rows, all_match = sc.compare_standings()
+            except Exception as e:
+                st.error(f"Failed: {e}")
+                st.stop()
+
+        if all_match:
+            st.success("Yes, all teams match!")
+        else:
+            mismatch_count = sum(1 for r in rows if r["status"] != "Match")
+            st.error(f"Teams don't match — {mismatch_count} issue(s) found.")
+
+        if mismatches_first:
+            rows = sorted(rows, key=lambda r: (r["status"] == "Match", r["calico_rank"] or 999))
+        else:
+            rows = sorted(rows, key=lambda r: r["calico_rank"] or 999)
+
+        st.dataframe(rows, use_container_width=True)
