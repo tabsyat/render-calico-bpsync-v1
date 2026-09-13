@@ -3,23 +3,7 @@ sync_core.py
 
 Core Render <-> Calico Tabbycat sync logic for IDL tournaments.
 Ported line-for-line from the working Colab notebook
-(Render_Calico_Sync_v2.ipynb) - same payload shapes, same endpoints,
-same no-trailing-slash conventions confirmed live by Chirag.
-
-Secrets are read from environment variables instead of Colab's
-userdata.get(), everything else is unchanged.
-
-Required env vars (no trailing slash on the URLs):
-    RENDER_URL, RENDER_TOKEN, CALICO_URL, CALICO_TOKEN
-
-*** RECONSTRUCTED FUNCTIONS - VERIFY AGAINST YOUR ORIGINALS ***
-The notebook export calls get_calico_pairings(), get_confirmed_ballot(),
-extract_calico_team_id(), and build_render_pairing_lookup() without
-defining them in any visible cell (likely defined in a cell that didn't
-make it into the export, or run earlier in the session). The versions
-below are inferred from how they're *called* elsewhere in the notebook.
-They are marked with RECONSTRUCTED comments - please check them against
-your real versions before relying on this in production.
+(Render_Calico_Sync_v2.ipynb)
 """
 
 import os
@@ -481,6 +465,18 @@ def push_draw_to_calico(round_seq, team_map, mark_as_draft=True, progress_callba
 # Section 0 - overview / reference counts, and shared duplicate-check helpers
 # ---------------------------------------------------------------------------
 
+def get_render_tournament_name():
+    """RENDER_URL already points at the tournament root - GET it directly."""
+    data = render_get("")
+    return data.get("name") or data.get("short_name") or "(unnamed tournament)"
+
+
+def get_calico_tournament_name():
+    """CALICO_URL already points at the tournament root - GET it directly."""
+    data = calico_get("")
+    return data.get("name") or data.get("short_name") or "(unnamed tournament)"
+
+
 def get_calico_team_count():
     return len(calico_get("/teams"))
 
@@ -512,12 +508,7 @@ def get_overview_counts():
 
 
 def count_render_pairings_with_results(round_seq):
-    """
-    Proxy for 'results already recorded this round' - counts Render
-    pairings whose result_status is 'C' (confirmed). Used by Section 2's
-    mandatory pre-push check, since adjudicators sometimes file double
-    ballots and a silent re-push could duplicate them.
-    """
+
     pairings = get_render_pairings(round_seq)
     return sum(1 for p in pairings if p.get("result_status") == "C")
 
@@ -530,11 +521,7 @@ import math
 
 
 def required_adj_and_room_count():
-    """
-    BP: 4 teams per room, 1 adj per room. Uses Calico's team count as the
-    source of truth (that's what actually determines room/adj needs),
-    rounding up for byes/swings.
-    """
+
     calico_teams = get_calico_team_count()
     return math.ceil(calico_teams / 4) if calico_teams else 0
 
@@ -544,11 +531,7 @@ def get_render_venue_count():
 
 
 def create_dummy_venues(target_count, progress_callback=None):
-    """
-    Idempotent: only creates the shortfall between the manually-entered
-    target_count and existing Render venues, numbered continuing on from
-    the current count.
-    """
+
     existing = get_render_venue_count()
     to_create = max(target_count - existing, 0)
 
@@ -565,12 +548,7 @@ def create_dummy_venues(target_count, progress_callback=None):
 
 
 def create_dummy_adjudicators(target_count, progress_callback=None):
-    """
-    Idempotent: only creates the shortfall between the manually-entered
-    target_count and existing Render adjudicators. Chair-level base_score,
-    not trainee - everything else left empty (Tabbycat requires the keys
-    present even when there's nothing to put in them).
-    """
+
     existing = get_render_adjudicator_count()
     to_create = max(target_count - existing, 0)
 
