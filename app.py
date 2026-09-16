@@ -57,17 +57,27 @@ section = st.sidebar.radio(
     }[s],
 )
 
+@st.cache_data(ttl=60)
+def _cached_render_tournament_name():
+    return sc.get_render_tournament_name()
+
+
+@st.cache_data(ttl=60)
+def _cached_calico_tournament_name():
+    return sc.get_calico_tournament_name()
+
+
 if section == "0":
     st.header("Section 0 — Overview")
     st.caption(SECTION_DESCRIPTIONS["0"])
 
     try:
-        render_name = sc.get_render_tournament_name()
+        render_name = _cached_render_tournament_name()
     except Exception:
         render_name = f"(couldn't fetch name — `{sc.RENDER_URL}`)"
 
     try:
-        calico_name = sc.get_calico_tournament_name()
+        calico_name = _cached_calico_tournament_name()
     except Exception:
         calico_name = f"(couldn't fetch name — `{sc.CALICO_URL}`)"
 
