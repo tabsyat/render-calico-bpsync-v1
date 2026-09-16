@@ -12,11 +12,26 @@ try:
     sc.load_config()
 except sc.ConfigError as e:
     st.error(
-        f"{e}\n\nSet RENDER_URL, RENDER_TOKEN, CALICO_URL, CALICO_TOKEN as "
+        f"{e}\n\nSet RENDER_URL, RENDER_TOKEN, CALICO_URL, CALICO_TOKEN, APP_PASSWORD as "
         f"Environment Variables on your Render service (Dashboard -> your "
         f"service -> Environment), then redeploy."
     )
     st.stop()
+
+if not st.session_state.get("authenticated"):
+    st.header("🔒 Locked")
+    st.caption("Enter the shared password to continue. This is asked again on every page load/refresh.")
+    pw = st.text_input("Password", type="password", key="login_pw")
+    if st.button("Unlock", type="primary"):
+        if sc.check_password(pw):
+            st.session_state["authenticated"] = True
+            sc.log_action("Login", "Unlocked the app")
+            st.rerun()
+        else:
+            sc.log_action("Failed login attempt", "")
+            st.error("Incorrect password.")
+    st.stop()
+
 
 SECTION_DESCRIPTIONS = {
     "0": "Reference dashboard — tournament info and current counts. Not required, just a sanity check.",
@@ -25,11 +40,12 @@ SECTION_DESCRIPTIONS = {
     "2": "Review the generated draw on Render's UI, then push it to Calico.",
     "3": "After a round is played on Calico, pull confirmed results into Render.",
     "4": "Compare final standings between Calico and Render to confirm they match.",
+    "5": "Log of every change made through this app — who did what, and when.",
 }
 
 section = st.sidebar.radio(
     "Section",
-    ["0", "1", "1.5", "2", "3", "4"],
+    ["0", "1", "1.5", "2", "3", "4", "5"],
     format_func=lambda s: {
         "0": "0. Overview",
         "1": "1. Import Teams",
@@ -37,6 +53,7 @@ section = st.sidebar.radio(
         "2": "2. Push Draw → Calico",
         "3": "3. Pull Results → Render",
         "4": "4. Compare Standings",
+        "5": "5. Action Log",
     }[s],
 )
 
@@ -109,6 +126,7 @@ if section == "0":
             restored = json.loads(uploaded.read())
             restored = {int(k): v for k, v in restored.items()}
             sc.save_team_map(restored)
+            sc.log_action("Restored team_map.json", f"{len(restored)} team mapping(s)")
             st.success(f"Restored team_map.json with {len(restored)} team mapping(s).")
         except Exception as e:
             st.error(f"Failed to restore: {e}")
@@ -139,6 +157,11 @@ if section == "0":
                             f"{result['target']} requested. Nothing to add."
                         )
                     else:
+                        sc.log_action(
+                            "Created dummy adjudicators",
+                            f"{result['created']} created ({result['existing_before']} -> "
+                            f"{result['existing_before'] + result['created']})",
+                        )
                         st.success(
                             f"Created {result['created']} adjudicator(s) "
                             f"({result['existing_before']} → {result['existing_before'] + result['created']}, "
@@ -165,6 +188,11 @@ if section == "0":
                             f"{result['target']} requested. Nothing to add."
                         )
                     else:
+                        sc.log_action(
+                            "Created dummy rooms",
+                            f"{result['created']} created ({result['existing_before']} -> "
+                            f"{result['existing_before'] + result['created']})",
+                        )
                         st.success(
                             f"Created {result['created']} room(s) "
                             f"({result['existing_before']} → {result['existing_before'] + result['created']}, "
@@ -202,6 +230,7 @@ elif section == "1":
 
                 try:
                     team_map = sc.import_teams(progress_callback=cb)
+                    sc.log_action("Imported teams", f"{len(team_map)} team(s), full import")
                     st.success(f"Imported {len(team_map)} teams. team_map.json written.")
                     st.download_button(
                         "Download team_map.json (keep this safe!)",
@@ -237,6 +266,7 @@ elif section == "1":
                 try:
                     missing_ids = [t["id"] for t in missing]
                     team_map = sc.import_teams(progress_callback=cb, only_calico_ids=missing_ids)
+                    sc.log_action("Imported teams", f"{len(missing_ids)} missing team(s) filled")
                     st.success(f"Created {len(missing_ids)} missing team(s). team_map.json updated.")
                     st.download_button(
                         "Download team_map.json (keep this safe!)",
@@ -314,6 +344,11 @@ elif section == "1.5":
         if n_resolved and st.button("Push availability to Render", type="primary"):
             try:
                 sc.push_team_availability_to_render(round_seq_value, result["resolved_render_urls"])
+                sc.log_action(
+                    "Synced team availability",
+                    f"Round {round_seq_value}: {n_resolved} marked available"
+                    + (f", {n_unresolved} skipped (unmapped)" if n_unresolved else ""),
+                )
                 st.success(f"Marked {n_resolved} team(s) available on Render for Round {round_seq_value}.")
                 if n_unresolved:
                     st.warning(f"{n_unresolved} team(s) were skipped — see above.")
@@ -366,6 +401,11 @@ elif section == "2":
             result = sc.push_draw_to_calico(
                 int(round_seq), team_map, mark_as_draft=mark_as_draft, progress_callback=cb
             )
+            sc.log_action(
+                "Pushed draw to Calico",
+                f"Round {round_seq}: {len(result['pushed'])} pairing(s), "
+                f"marked_as_draft={mark_as_draft}",
+            )
             st.success(f"Pushed {len(result['pushed'])} pairing(s) to Calico.")
             if mark_as_draft:
                 st.info("Round marked as Draft on Calico — release it manually when ready.")
@@ -416,6 +456,11 @@ elif section == "3":
                 written, skipped = sc.write_results_to_render(
                     round_seq_value, team_map, render_lookup, progress_callback=cb
                 )
+                sc.log_action(
+                    "Pulled results to Render",
+                    f"Round {round_seq_value}: {len(written)} written"
+                    + (f", {len(skipped)} skipped" if skipped else ""),
+                )
                 st.success(f"Wrote {len(written)} result(s) to Render.")
                 if skipped:
                     st.info(f"Skipped (no confirmed ballot or no matching Render pairing): {skipped}")
@@ -430,26 +475,71 @@ elif section == "3":
 elif section == "4":
     st.header("Section 4 — Compare Standings")
     st.caption(SECTION_DESCRIPTIONS["4"])
+    st.info("🔒 You'll be asked to confirm your password before standings are generated.")
 
     mismatches_first = st.checkbox("Show mismatches first")
 
+    @st.dialog("Confirm password")
+    def standings_password_dialog(mismatches_first_value):
+        st.caption("Standings are re-gated separately from the main login — re-enter your password to continue.")
+        pw = st.text_input("Password", type="password", key="standings_pw")
+        if st.button("Confirm & Compare", type="primary"):
+            if not sc.check_password(pw):
+                sc.log_action("Failed standings re-auth attempt", "")
+                st.error("Incorrect password.")
+                return
+
+            with st.spinner("Fetching standings from both instances..."):
+                try:
+                    rows, all_match = sc.compare_standings()
+                except Exception as e:
+                    st.error(f"Failed: {e}")
+                    return
+
+            sc.log_action(
+                "Compared standings",
+                "All matched" if all_match else f"{sum(1 for r in rows if r['status'] != 'Match')} mismatch(es)",
+            )
+
+            if all_match:
+                st.success("Yes, all teams match!")
+            else:
+                mismatch_count = sum(1 for r in rows if r["status"] != "Match")
+                st.error(f"Teams don't match — {mismatch_count} issue(s) found.")
+
+            if mismatches_first_value:
+                rows = sorted(rows, key=lambda r: (r["status"] == "Match", r["calico_rank"] or 999))
+            else:
+                rows = sorted(rows, key=lambda r: r["calico_rank"] or 999)
+
+            st.dataframe(rows, use_container_width=True)
+
+elif section == "5":
+    st.header("Section 5 — Action Log")
+    st.caption(SECTION_DESCRIPTIONS["5"])
+    st.markdown(
+        "Every change made through this app (imports, availability syncs, draw pushes, "
+        "result pulls, dummy creation, logins) is recorded here, newest first."
+    )
+    st.caption(
+        "⚠️ Like team_map.json, this log lives on Render's local disk and can be wiped on "
+        "redeploy/restart/spin-down wake. Download it periodically if you want to keep a "
+        "permanent record."
+    )
+
+    log = sc.load_action_log()
+
+    if not log:
+        st.info("No actions recorded yet on this instance.")
+    else:
+        display_rows = list(reversed(log))
+        st.dataframe(display_rows, use_container_width=True)
+        st.download_button(
+            "Download action_log.json",
+            data=json.dumps(log, indent=2),
+            file_name="action_log.json",
+            mime="application/json",
+        )
+
     if st.button("Compare Standings", type="primary"):
-        with st.spinner("Fetching standings from both instances..."):
-            try:
-                rows, all_match = sc.compare_standings()
-            except Exception as e:
-                st.error(f"Failed: {e}")
-                st.stop()
-
-        if all_match:
-            st.success("Yes, all teams match!")
-        else:
-            mismatch_count = sum(1 for r in rows if r["status"] != "Match")
-            st.error(f"Teams don't match — {mismatch_count} issue(s) found.")
-
-        if mismatches_first:
-            rows = sorted(rows, key=lambda r: (r["status"] == "Match", r["calico_rank"] or 999))
-        else:
-            rows = sorted(rows, key=lambda r: r["calico_rank"] or 999)
-
-        st.dataframe(rows, use_container_width=True)
+        standings_password_dialog(mismatches_first)
