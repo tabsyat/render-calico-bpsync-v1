@@ -423,20 +423,16 @@ def push_team_availability_to_render(round_seq, resolved_render_urls):
     """
     Writes team availability to Render for this round.
 
-    Tabbycat's PUT /availabilities endpoint appears to 500 when the new list
-    is SMALLER than what's currently marked available (observed: shrinking
-    48 -> 44 errors; manually clearing to 0 on Render's UI first, then
-    re-running, works fine). So we always clear to an empty list first, then
-    set the real list — makes this safe to re-run after late check-ins
-    change the count in either direction.
-
-    Note: depending on how this endpoint behaves, clearing/setting may affect
-    ALL availability for the round (adjudicators/venues included), not just
-    teams. That's acceptable here since adjudicator/venue availability on
-    Render is not used by this project — only team availability matters.
+    Clearing with an empty list ONLY works reliably when scoped with
+    ?teams=true — an empty list with no query param gives Tabbycat nothing
+    to infer the object type from, so it silently no-ops, the old
+    availability stays, and re-setting an already-available team then 500s
+    (observed: any overlap between old and new set triggers this). Scoping
+    the query param on both calls makes clear-then-set actually replace
+    team availability specifically, safe to re-run in either direction.
     """
-    render_put(f"/rounds/{round_seq}/availabilities", [])
-    return render_put(f"/rounds/{round_seq}/availabilities", resolved_render_urls)
+    render_put(f"/rounds/{round_seq}/availabilities?teams=true", [])
+    return render_put(f"/rounds/{round_seq}/availabilities?teams=true", resolved_render_urls)
 
 
 def get_render_tournament_name():
