@@ -1,8 +1,11 @@
 import os
 import json
+import secrets
+import datetime
 import requests
 
 TEAM_MAP_PATH = "team_map.json"
+ACTION_LOG_PATH = "action_log.json"
 REQUEST_TIMEOUT = 30  # seconds - prevents an indefinite hang on a cold/hung instance
 
 
@@ -24,6 +27,7 @@ RENDER_URL = None
 RENDER_TOKEN = None
 CALICO_URL = None
 CALICO_TOKEN = None
+APP_PASSWORD = None
 
 
 def normalize_tournament_api_url(raw_url: str) -> str:
@@ -42,11 +46,47 @@ def normalize_tournament_api_url(raw_url: str) -> str:
 
 
 def load_config():
-    global RENDER_URL, RENDER_TOKEN, CALICO_URL, CALICO_TOKEN
+    global RENDER_URL, RENDER_TOKEN, CALICO_URL, CALICO_TOKEN, APP_PASSWORD
     RENDER_URL = normalize_tournament_api_url(_get_env("RENDER_URL"))
     RENDER_TOKEN = _get_env("RENDER_TOKEN")
     CALICO_URL = normalize_tournament_api_url(_get_env("CALICO_URL"))
     CALICO_TOKEN = _get_env("CALICO_TOKEN")
+    APP_PASSWORD = _get_env("APP_PASSWORD")
+
+
+def check_password(entered: str) -> bool:
+    """Constant-time comparison against the shared APP_PASSWORD env var."""
+    if not entered:
+        return False
+    return secrets.compare_digest(entered, APP_PASSWORD)
+
+
+def load_action_log() -> list:
+    if not os.path.exists(ACTION_LOG_PATH):
+        return []
+    with open(ACTION_LOG_PATH) as f:
+        return json.load(f)
+
+
+def save_action_log(log: list):
+    with open(ACTION_LOG_PATH, "w") as f:
+        json.dump(log, f, indent=2)
+
+
+def log_action(action: str, details: str = ""):
+    """Append one entry to the action log. Best-effort — never raises,
+    so a logging hiccup can't block the actual operation it's recording."""
+    try:
+        log = load_action_log()
+        log.append({
+            "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+            "action": action,
+            "details": details,
+        })
+        save_action_log(log)
+    except Exception:
+        pass
+
 
 
 def _headers(token):
