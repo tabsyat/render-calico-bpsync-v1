@@ -514,6 +514,9 @@ elif section == "4":
 
             st.dataframe(rows, use_container_width=True)
 
+    if st.button("Compare Standings", type="primary"):
+        standings_password_dialog(mismatches_first)
+
 elif section == "5":
     st.header("Section 5 — Action Log")
     st.caption(SECTION_DESCRIPTIONS["5"])
@@ -540,6 +543,3 @@ elif section == "5":
             file_name="action_log.json",
             mime="application/json",
         )
-
-    if st.button("Compare Standings", type="primary"):
-        standings_password_dialog(mismatches_first)
