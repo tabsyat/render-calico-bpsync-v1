@@ -109,6 +109,13 @@ def render_patch(path, payload):
     return r.json()
 
 
+def render_put(path, payload):
+    r = requests.put(f"{RENDER_URL}{path}", headers=_headers(RENDER_TOKEN), json=payload, timeout=REQUEST_TIMEOUT)
+    if not r.ok:
+        _raise_with_body(r)
+    return r.json()
+
+
 def calico_get(path):
     return _get_json_following_pagination(f"{CALICO_URL}{path}", _headers(CALICO_TOKEN))
 
@@ -367,6 +374,56 @@ def push_draw_to_calico(round_seq, team_map, mark_as_draft=True, progress_callba
     return {"pushed": pushed}
 
 
+def get_calico_team_availability(round_seq):
+    """List of Calico team detail URLs currently marked available for the round."""
+    return calico_get(f"/rounds/{round_seq}/availabilities?teams=true")
+
+
+def check_availability_sync(round_seq, team_map):
+    """
+    Compare Calico's checked-in teams for a round against team_map.json.
+    Never raises on an unmapped team — flags it as unresolved instead, same
+    as Section 1's 'partial' state, since new teams may be added mid-tournament.
+    """
+    calico_urls = get_calico_team_availability(round_seq)
+    calico_refs = get_calico_id_to_reference()
+
+    resolved_render_urls = []
+    resolved_refs = []
+    unresolved_ids = []
+    unresolved_refs = []
+
+    for url in calico_urls:
+        calico_id = extract_calico_team_id(url)
+        render_id = team_map.get(calico_id)
+        ref = calico_refs.get(calico_id, f"Team {calico_id}")
+        if render_id is None:
+            unresolved_ids.append(calico_id)
+            unresolved_refs.append(ref)
+        else:
+            resolved_render_urls.append(f"{RENDER_URL}/teams/{render_id}")
+            resolved_refs.append(ref)
+
+    return {
+        "total_available": len(calico_urls),
+        "resolved_render_urls": resolved_render_urls,
+        "resolved_refs": resolved_refs,
+        "unresolved_ids": unresolved_ids,
+        "unresolved_refs": unresolved_refs,
+    }
+
+
+def push_team_availability_to_render(round_seq, resolved_render_urls):
+    """
+    Writes team availability to Render for this round. Note: depending on how
+    Tabbycat's PUT /availabilities endpoint behaves, this may replace ALL
+    availability (adjudicators/venues included) for the round, not just teams.
+    That's acceptable here since adjudicator/venue availability on Render is
+    not used by this project — only team availability matters.
+    """
+    return render_put(f"/rounds/{round_seq}/availabilities", resolved_render_urls)
+
+
 def get_render_tournament_name():
     data = render_get("")
     return data.get("name") or data.get("short_name") or "(unnamed tournament)"
@@ -400,10 +457,6 @@ def get_overview_counts():
         "calico_adjs": get_calico_adjudicator_count(),
         "render_adjs": get_render_adjudicator_count(),
     }
-    return x, y, "partial", (
-        "Some teams are not migrated to Render — please delete all teams on Render "
-        "and re-run the import."
-    )
 
 
 def count_render_pairings_with_results(round_seq):
