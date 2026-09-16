@@ -375,8 +375,14 @@ def push_draw_to_calico(round_seq, team_map, mark_as_draft=True, progress_callba
 
 
 def get_calico_team_availability(round_seq):
-    """List of Calico team detail URLs currently marked available for the round."""
-    return calico_get(f"/rounds/{round_seq}/availabilities?teams=true")
+    """
+    List of Calico team detail URLs currently marked available for the round.
+    Calico's ?teams=true filter is not reliably honored in practice — it can
+    return adjudicators and venues mixed in. Filter client-side on URL shape
+    so only actual team URLs ever reach the resolve/push step.
+    """
+    raw = calico_get(f"/rounds/{round_seq}/availabilities?teams=true")
+    return [u for u in raw if "/teams/" in str(u)]
 
 
 def check_availability_sync(round_seq, team_map):
@@ -415,12 +421,21 @@ def check_availability_sync(round_seq, team_map):
 
 def push_team_availability_to_render(round_seq, resolved_render_urls):
     """
-    Writes team availability to Render for this round. Note: depending on how
-    Tabbycat's PUT /availabilities endpoint behaves, this may replace ALL
-    availability (adjudicators/venues included) for the round, not just teams.
-    That's acceptable here since adjudicator/venue availability on Render is
-    not used by this project — only team availability matters.
+    Writes team availability to Render for this round.
+
+    Tabbycat's PUT /availabilities endpoint appears to 500 when the new list
+    is SMALLER than what's currently marked available (observed: shrinking
+    48 -> 44 errors; manually clearing to 0 on Render's UI first, then
+    re-running, works fine). So we always clear to an empty list first, then
+    set the real list — makes this safe to re-run after late check-ins
+    change the count in either direction.
+
+    Note: depending on how this endpoint behaves, clearing/setting may affect
+    ALL availability for the round (adjudicators/venues included), not just
+    teams. That's acceptable here since adjudicator/venue availability on
+    Render is not used by this project — only team availability matters.
     """
+    render_put(f"/rounds/{round_seq}/availabilities", [])
     return render_put(f"/rounds/{round_seq}/availabilities", resolved_render_urls)
 
 
