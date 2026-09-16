@@ -21,6 +21,7 @@ except sc.ConfigError as e:
 SECTION_DESCRIPTIONS = {
     "0": "Reference dashboard — tournament info and current counts. Not required, just a sanity check.",
     "1": "One-time: copy all teams from Calico to Render, before Round 1.",
+    "1.5": "Before generating a draw: sync which teams checked in on Calico so Render's draw generation uses the right pool.",
     "2": "Review the generated draw on Render's UI, then push it to Calico.",
     "3": "After a round is played on Calico, pull confirmed results into Render.",
     "4": "Compare final standings between Calico and Render to confirm they match.",
@@ -28,10 +29,11 @@ SECTION_DESCRIPTIONS = {
 
 section = st.sidebar.radio(
     "Section",
-    ["0", "1", "2", "3", "4"],
+    ["0", "1", "1.5", "2", "3", "4"],
     format_func=lambda s: {
         "0": "0. Overview",
         "1": "1. Import Teams",
+        "1.5": "1.5 Sync Team Availability",
         "2": "2. Push Draw → Calico",
         "3": "3. Pull Results → Render",
         "4": "4. Compare Standings",
@@ -250,6 +252,74 @@ elif section == "1":
 
     st.caption("Clicking this always re-checks live counts first — go back to Section 0 "
                "any time to double check the numbers match your expectations.")
+
+elif section == "1.5":
+    st.header("Section 1.5 — Sync Team Availability (Calico → Render)")
+    st.caption(SECTION_DESCRIPTIONS["1.5"])
+    st.markdown(
+        "Teams check in on **Calico** (the public site) via their private URLs. "
+        "Run this **before generating each round's draw on Render**, so Render's "
+        "draw generation only considers teams that actually checked in."
+    )
+
+    round_seq = st.number_input("Round number", min_value=1, step=1, value=1, key="avail_round")
+
+    @st.dialog("Availability check")
+    def availability_check_dialog(round_seq_value):
+        with st.spinner("Fetching checked-in teams from Calico..."):
+            try:
+                team_map = sc.load_team_map()
+                if not team_map:
+                    st.error("team_map.json not found — run Section 1 first.")
+                    return
+                team_map = {int(k): v for k, v in team_map.items()}
+                result = sc.check_availability_sync(round_seq_value, team_map)
+            except Exception as e:
+                st.error(f"Check failed: {e}")
+                return
+
+        st.markdown(f"**{result['total_available']} team(s) currently marked available on Calico for Round {round_seq_value}.**")
+
+        n_resolved = len(result["resolved_render_urls"])
+        n_unresolved = len(result["unresolved_ids"])
+
+        if n_resolved:
+            st.success(
+                f"✅ {n_resolved} team(s) resolved and will be marked available on Render: "
+                + ", ".join(result["resolved_refs"][:15])
+                + (", ..." if n_resolved > 15 else "")
+            )
+        else:
+            st.warning("No teams could be resolved — nothing would be written to Render.")
+
+        if n_unresolved:
+            st.warning(
+                f"⚠️ {n_unresolved} team(s) are not in team_map.json and will be skipped: "
+                + ", ".join(result["unresolved_refs"][:15])
+                + (", ..." if n_unresolved > 15 else "")
+                + "\n\nRe-run **Section 1 → Fill remaining teams** to map these, then retry this section."
+            )
+
+        if result["total_available"] and result["total_available"] < 0.5 * max(sc.get_calico_team_count(), 1):
+            st.info(
+                "Fewer than half of all Calico teams are checked in — double check that "
+                "check-ins are actually complete before pushing."
+            )
+
+        if n_resolved and st.button("Push availability to Render", type="primary"):
+            try:
+                sc.push_team_availability_to_render(round_seq_value, result["resolved_render_urls"])
+                st.success(f"Marked {n_resolved} team(s) available on Render for Round {round_seq_value}.")
+                if n_unresolved:
+                    st.warning(f"{n_unresolved} team(s) were skipped — see above.")
+            except Exception as e:
+                st.error(f"Failed to push availability: {e}")
+
+    if st.button("Check & Sync Availability", type="primary"):
+        availability_check_dialog(int(round_seq))
+
+    st.caption("Clicking this always re-fetches live check-in status from Calico first — "
+               "nothing is written until you confirm on the resolved/unresolved breakdown.")
 
 elif section == "2":
     st.header("Section 2 — Review Draw → Push to Calico")
