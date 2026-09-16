@@ -480,7 +480,7 @@ elif section == "4":
     mismatches_first = st.checkbox("Show mismatches first")
 
     @st.dialog("Confirm password")
-    def standings_password_dialog(mismatches_first_value):
+    def standings_password_dialog():
         st.caption("Standings are re-gated separately from the main login — re-enter your password to continue.")
         pw = st.text_input("Password", type="password", key="standings_pw")
         if st.button("Confirm & Compare", type="primary"):
@@ -500,22 +500,30 @@ elif section == "4":
                 "Compared standings",
                 "All matched" if all_match else f"{sum(1 for r in rows if r['status'] != 'Match')} mismatch(es)",
             )
-
-            if all_match:
-                st.success("Yes, all teams match!")
-            else:
-                mismatch_count = sum(1 for r in rows if r["status"] != "Match")
-                st.error(f"Teams don't match — {mismatch_count} issue(s) found.")
-
-            if mismatches_first_value:
-                rows = sorted(rows, key=lambda r: (r["status"] == "Match", r["calico_rank"] or 999))
-            else:
-                rows = sorted(rows, key=lambda r: r["calico_rank"] or 999)
-
-            st.dataframe(rows, use_container_width=True)
+            # Store results and close the dialog — rendering the table here would
+            # cap it to the modal's width and drop the dataframe's fullscreen control.
+            st.session_state["standings_result"] = {"rows": rows, "all_match": all_match}
+            st.rerun()
 
     if st.button("Compare Standings", type="primary"):
-        standings_password_dialog(mismatches_first)
+        standings_password_dialog()
+
+    result = st.session_state.get("standings_result")
+    if result:
+        rows, all_match = result["rows"], result["all_match"]
+
+        if all_match:
+            st.success("Yes, all teams match!")
+        else:
+            mismatch_count = sum(1 for r in rows if r["status"] != "Match")
+            st.error(f"Teams don't match — {mismatch_count} issue(s) found.")
+
+        if mismatches_first:
+            rows = sorted(rows, key=lambda r: (r["status"] == "Match", r["calico_rank"] or 999))
+        else:
+            rows = sorted(rows, key=lambda r: r["calico_rank"] or 999)
+
+        st.dataframe(rows, use_container_width=True)
 
 elif section == "5":
     st.header("Section 5 — Action Log")
