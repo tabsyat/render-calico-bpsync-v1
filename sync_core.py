@@ -423,16 +423,16 @@ def push_team_availability_to_render(round_seq, resolved_render_urls):
     """
     Writes team availability to Render for this round.
 
-    Clearing with an empty list ONLY works reliably when scoped with
-    ?teams=true — an empty list with no query param gives Tabbycat nothing
-    to infer the object type from, so it silently no-ops, the old
-    availability stays, and re-setting an already-available team then 500s
-    (observed: any overlap between old and new set triggers this). Scoping
-    the query param on both calls makes clear-then-set actually replace
-    team availability specifically, safe to re-run in either direction.
+    Tabbycat's PUT /availabilities endpoint 500s if any team in the new list
+    is already marked available (confirmed: happens even when the empty-list
+    clear is scoped with ?teams=true first — the bug appears to be in
+    Tabbycat itself, not something we can work around from this side).
+
+    Workaround (manual, by design): clear all team availability on Render's
+    own UI before running this sync. This function does a single plain PUT
+    and assumes that's already been done.
     """
-    render_put(f"/rounds/{round_seq}/availabilities?teams=true", [])
-    return render_put(f"/rounds/{round_seq}/availabilities?teams=true", resolved_render_urls)
+    return render_put(f"/rounds/{round_seq}/availabilities", resolved_render_urls)
 
 
 def get_render_tournament_name():
