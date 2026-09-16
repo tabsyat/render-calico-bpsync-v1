@@ -261,6 +261,11 @@ elif section == "1.5":
         "Run this **before generating each round's draw on Render**, so Render's "
         "draw generation only considers teams that actually checked in."
     )
+    st.warning(
+        "⚠️ Before running this, manually clear all team availability on **Render's own UI** "
+        "for this round. Tabbycat's API 500s if any team in the new list is already marked "
+        "available — clearing first avoids that."
+    )
 
     round_seq = st.number_input("Round number", min_value=1, step=1, value=1, key="avail_round")
 
